@@ -60,6 +60,10 @@ model Product {
   business3m           Float?    @map("business_3m")
   salesDataSyncedAt    DateTime? @map("sales_data_synced_at")
 
+  // 次回入荷情報（手動入力）
+  nextArrivalDate      DateTime? @map("next_arrival_date")
+  nextArrivalQuantity  Int?      @map("next_arrival_quantity")
+
   // 管理フラグ
   isDiscontinued       Boolean   @default(false) @map("is_discontinued")
   isActive             Boolean   @default(true)  @map("is_active")

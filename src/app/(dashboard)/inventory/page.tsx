@@ -4,7 +4,7 @@ import SyncButton from "./_components/SyncButton";
 import SearchInput from "./_components/SearchInput";
 import InventoryRow from "./_components/InventoryRow";
 
-const EXPIRY_WARN_MONTHS = 14;
+const EXPIRY_WARN_MONTHS = 18;
 
 export default async function InventoryPage({
   searchParams,
@@ -176,7 +176,7 @@ export default async function InventoryPage({
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">ロジレス在庫</th>
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">3ヶ月売上</th>
               <th className="text-left px-3 py-2 font-medium whitespace-nowrap">ロケーション</th>
-              <th className="text-left px-3 py-2 font-medium whitespace-nowrap">出荷期限 <span className="font-normal text-gray-400">(14ヶ月以内⚠)</span></th>
+              <th className="text-left px-3 py-2 font-medium whitespace-nowrap">出荷期限 <span className="font-normal text-gray-400">(18ヶ月以内⚠)</span></th>
             </tr>
           </thead>
           <tbody>
