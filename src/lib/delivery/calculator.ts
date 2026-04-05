@@ -1,0 +1,241 @@
+import { addMonths, isAfter, isBefore } from "date-fns";
+import type {
+  CalculationSummary,
+  DeliveryCalculationResult,
+  LojilessInventoryForCalc,
+  ProductForCalculation,
+  SkipReason,
+} from "./types";
+
+// ── 定数 ──────────────────────────────────────────────────
+const EXPIRY_MIN_MONTHS = 14;        // 最低有効期限（月）
+const EXPIRY_WARN_MONTHS = 18;       // 警告有効期限（月）
+
+const WITH_PRES_QTY_MIN = 10;        // 度あり：最小納品数
+const WITH_PRES_QTY_MAX = 30;        // 度あり：最大納品数
+const WITH_PRES_QTY_STEP = 10;       // 度あり：刻み幅
+
+const WITHOUT_PRES_QTY_MIN = 10;     // 度なし：最小納品数
+const WITHOUT_PRES_QTY_MAX = 100;    // 度なし：最大納品数
+const WITHOUT_PRES_QTY_STEP = 10;    // 度なし：刻み幅
+
+// ── ユーティリティ ────────────────────────────────────────
+
+/** 指定の刻みで切り上げ（例: 23 → step=10 → 30） */
+function roundUpToStep(value: number, step: number): number {
+  return Math.ceil(value / step) * step;
+}
+
+/** min〜maxにクランプしてstep刻みに調整 */
+function clampToRange(value: number, min: number, max: number, step: number): number {
+  const rounded = roundUpToStep(value, step);
+  return Math.min(Math.max(rounded, min), max);
+}
+
+// ── 期限チェック ──────────────────────────────────────────
+
+/**
+ * ロジレス在庫から納品可能なロット（期限 >= EXPIRY_MIN_MONTHS）を取得する
+ * 複数ロットがある場合は期限の近い順に返す
+ */
+function getDeliverableLots(
+  inventories: LojilessInventoryForCalc[]
+): LojilessInventoryForCalc[] {
+  const now = new Date();
+  const minExpiry = addMonths(now, EXPIRY_MIN_MONTHS);
+
+  return inventories
+    .filter((inv) => {
+      // ロケーションが納品不可の場合はスキップ
+      if (isUnavailableLocation(inv.location)) return false;
+      // 期限なし（長期保存品）は納品可
+      if (!inv.expiryDate) return true;
+      // 期限が14ヶ月以上先のみ納品可
+      return isAfter(inv.expiryDate, minExpiry) || inv.expiryDate.getTime() === minExpiry.getTime();
+    })
+    .sort((a, b) => {
+      // 期限の近い順（FIFOで消費）
+      if (!a.expiryDate) return 1;
+      if (!b.expiryDate) return -1;
+      return a.expiryDate.getTime() - b.expiryDate.getTime();
+    });
+}
+
+/** 納品不可ロケーション判定 */
+function isUnavailableLocation(location: string | null): boolean {
+  if (!location) return false;
+  const unavailable = [
+    "出荷期限切れ",
+    "アウトレット専用在庫",
+    "FBA専用在庫",
+  ];
+  // "Amazon" + 数字 または 地名（簡易判定）
+  if (/^Amazon\d+/.test(location)) return true;
+  return unavailable.some((u) => location.startsWith(u));
+}
+
+/** 期限が14〜18ヶ月以内かどうか */
+function isExpiryWarning(expiryDate: Date | null): boolean {
+  if (!expiryDate) return false;
+  const now = new Date();
+  const warnThreshold = addMonths(now, EXPIRY_WARN_MONTHS);
+  const minThreshold = addMonths(now, EXPIRY_MIN_MONTHS);
+  return isAfter(expiryDate, minThreshold) && isBefore(expiryDate, warnThreshold);
+}
+
+// ── 度あり 計算 ───────────────────────────────────────────
+
+function calcWithPrescription(
+  product: ProductForCalculation
+): { quantity: number; skipReason: SkipReason | null } {
+  const { fbaStockQuantity, business3m } = product;
+
+  if (fbaStockQuantity === 0) {
+    return { quantity: 20, skipReason: null };
+  }
+  if (fbaStockQuantity <= 15 && (business3m ?? 0) >= 5) {
+    return { quantity: WITH_PRES_QTY_MIN, skipReason: null };
+  }
+  if (fbaStockQuantity < 10) {
+    return { quantity: WITH_PRES_QTY_MIN, skipReason: null };
+  }
+  return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
+}
+
+// ── 度なし 計算 ───────────────────────────────────────────
+
+function calcWithoutPrescription(
+  product: ProductForCalculation
+): { quantity: number; skipReason: SkipReason | null } {
+  const { fbaStockQuantity, business3m } = product;
+  const monthly3m = business3m ?? 0;
+  const target = monthly3m * 1.2;
+
+  if (fbaStockQuantity === 0) {
+    return { quantity: 50, skipReason: null };
+  }
+  if (fbaStockQuantity < target) {
+    const needed = target - fbaStockQuantity;
+    const qty = clampToRange(needed, WITHOUT_PRES_QTY_MIN, WITHOUT_PRES_QTY_MAX, WITHOUT_PRES_QTY_STEP);
+    return { quantity: qty, skipReason: null };
+  }
+  return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
+}
+
+// ── メイン計算 ────────────────────────────────────────────
+
+export function calculateDeliveryQuantity(
+  product: ProductForCalculation
+): DeliveryCalculationResult {
+  const baseResult = {
+    productId: product.id,
+    sku: product.sku,
+    name: product.name,
+    suggestedQuantity: 0,
+    lotNumber: null,
+    expiryDate: null,
+    expiryWarning: false,
+    skipReason: null as SkipReason | null,
+  };
+
+  // 終売チェック
+  if (product.isDiscontinued) {
+    return { ...baseResult, skipReason: "DISCONTINUED" };
+  }
+
+  // 納品可能ロット取得
+  const deliverableLots = getDeliverableLots(product.logilessInventories);
+
+  // 利用可能在庫の合計（reserve控除後）
+  const totalDeliverable = deliverableLots.reduce((sum, l) => sum + l.quantity, 0);
+  const availableForDelivery = totalDeliverable - product.logilessStockReserve;
+
+  if (availableForDelivery <= 0) {
+    return { ...baseResult, skipReason: "NO_LOGILESS_STOCK" };
+  }
+
+  // FBA上限チェック
+  if (product.fbaStockUpperLimit !== null) {
+    const room = product.fbaStockUpperLimit - product.fbaStockQuantity;
+    if (room <= 0) {
+      return { ...baseResult, skipReason: "UPPER_LIMIT_REACHED" };
+    }
+  }
+
+  // 種別ごとに計算
+  const { quantity, skipReason } =
+    product.productType === "WITH_PRESCRIPTION"
+      ? calcWithPrescription(product)
+      : calcWithoutPrescription(product);
+
+  if (skipReason) {
+    return { ...baseResult, skipReason };
+  }
+
+  // ロジレス在庫が不足する場合は調整
+  const finalQuantity = Math.min(quantity, availableForDelivery);
+  if (finalQuantity <= 0) {
+    return { ...baseResult, skipReason: "NO_LOGILESS_STOCK" };
+  }
+
+  // FBA上限に合わせてクリップ
+  const cappedQuantity =
+    product.fbaStockUpperLimit !== null
+      ? Math.min(finalQuantity, product.fbaStockUpperLimit - product.fbaStockQuantity)
+      : finalQuantity;
+
+  // 使用するロットを特定（期限の近い順）
+  const usedLot = deliverableLots[0];
+  const expiryDate = usedLot?.expiryDate ?? null;
+
+  return {
+    ...baseResult,
+    suggestedQuantity: cappedQuantity,
+    lotNumber: usedLot?.lotNumber ?? null,
+    expiryDate,
+    expiryWarning: isExpiryWarning(expiryDate),
+    skipReason: null,
+  };
+}
+
+// ── バッチ計算 ────────────────────────────────────────────
+
+export interface BatchCalculationOptions {
+  targetTotal: number;      // 目標合計（度あり:500、度なし:1000）
+  maxPerPlan: number;       // 1プランあたり最大SKU数（300）
+}
+
+export function calculateBatch(
+  products: ProductForCalculation[],
+  options: BatchCalculationOptions
+): CalculationSummary {
+  const results: DeliveryCalculationResult[] = [];
+  let runningTotal = 0;
+
+  for (const product of products) {
+    const result = calculateDeliveryQuantity(product);
+    results.push(result);
+
+    if (!result.skipReason) {
+      runningTotal += result.suggestedQuantity;
+      // 目標を超えたら以降の数量を調整
+      if (runningTotal > options.targetTotal * 1.1) {
+        result.suggestedQuantity = Math.max(
+          0,
+          result.suggestedQuantity - (runningTotal - options.targetTotal)
+        );
+        runningTotal = options.targetTotal;
+      }
+    }
+  }
+
+  const deliverable = results.filter((r) => !r.skipReason);
+  const skipped = results.filter((r) => r.skipReason);
+
+  return {
+    results,
+    totalQuantity: deliverable.reduce((s, r) => s + r.suggestedQuantity, 0),
+    deliverableCount: deliverable.length,
+    skippedCount: skipped.length,
+  };
+}

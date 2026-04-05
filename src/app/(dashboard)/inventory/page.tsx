@@ -1,0 +1,219 @@
+import { db } from "@/lib/db";
+import { addMonths } from "date-fns";
+import SyncButton from "./_components/SyncButton";
+import SearchInput from "./_components/SearchInput";
+import InventoryRow from "./_components/InventoryRow";
+
+const EXPIRY_WARN_MONTHS = 14;
+
+export default async function InventoryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ type?: string; cat?: string; q?: string; page?: string }>;
+}) {
+  const params = await searchParams;
+  const productType = params.type === "WITH_PRESCRIPTION"
+    ? "WITH_PRESCRIPTION" as const
+    : params.type === "WITHOUT_PRESCRIPTION"
+    ? "WITHOUT_PRESCRIPTION" as const
+    : undefined;
+  const categoryFilter = params.cat ?? "";
+  const search = params.q ?? "";
+  const page = Number(params.page ?? 1);
+  const perPage = 50;
+
+  // カテゴリ一覧を取得（タブ表示用・表示順固定）
+  const CATEGORY_ORDER = [
+    "度なし", "1day10P", "1day30P", "高含水等", "Pixie",
+    "ハイドロゲル", "UVチャーミング", "UVピュア", "1m2p",
+    "色なしコンタクト", "Charm10P", "Charm30P",
+  ];
+  const allCategories = await db.productCategory.findMany({
+    select: { id: true, name: true },
+  });
+  const categories = allCategories.sort((a, b) => {
+    const ai = CATEGORY_ORDER.indexOf(a.name);
+    const bi = CATEGORY_ORDER.indexOf(b.name);
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+  });
+
+  // カテゴリIDを特定
+  const selectedCategory = categoryFilter
+    ? categories.find((c) => c.name === categoryFilter)
+    : undefined;
+
+  const where = {
+    isActive: true,
+    ...(productType ? { productType } : {}),
+    ...(selectedCategory ? { categoryId: selectedCategory.id } : {}),
+    ...(search
+      ? {
+          OR: [
+            { sku: { contains: search, mode: "insensitive" as const } },
+            { name: { contains: search, mode: "insensitive" as const } },
+            { fnsku: { contains: search, mode: "insensitive" as const } },
+            { asin: { contains: search, mode: "insensitive" as const } },
+            { janCode: { contains: search, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  };
+
+  const [products, total] = await Promise.all([
+    db.product.findMany({
+      where,
+      include: {
+        logilessInventories: true,
+      },
+      orderBy: { sku: "asc" },
+      skip: (page - 1) * perPage,
+      take: perPage,
+    }),
+    db.product.count({ where }),
+  ]);
+
+  const minExpiry = addMonths(new Date(), EXPIRY_WARN_MONTHS);
+
+  return (
+    <div className="p-6">
+      {/* ヘッダー */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900">在庫一覧</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            全 {total} SKU
+          </p>
+        </div>
+        <SyncButton />
+      </div>
+
+      {/* カテゴリタブ */}
+      <div className="flex flex-wrap gap-1.5 mb-4 border-b border-gray-200 pb-3">
+        <a
+          href={`?cat=&type=${params.type ?? ""}&q=${search}`}
+          className={`px-3 py-0.5 rounded-lg text-xs font-medium transition-colors ${
+            !categoryFilter
+              ? "bg-blue-600 text-white"
+              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+          }`}
+        >
+          すべて
+        </a>
+        {categories.map((cat) => (
+          <a
+            key={cat.id}
+            href={`?cat=${encodeURIComponent(cat.name)}&type=${params.type ?? ""}&q=${search}`}
+            className={`px-3 py-0.5 rounded-lg text-xs font-medium transition-colors ${
+              categoryFilter === cat.name
+                ? "bg-blue-600 text-white"
+                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            {cat.name}
+          </a>
+        ))}
+      </div>
+
+      {/* フィルター */}
+      <div className="flex items-center gap-3 mb-4">
+        <SearchInput />
+        <div className="flex rounded-lg border border-gray-300 overflow-hidden text-sm">
+          {[
+            { value: "", label: "すべて" },
+            { value: "WITH_PRESCRIPTION", label: "度あり" },
+            { value: "WITHOUT_PRESCRIPTION", label: "度なし" },
+          ].map((opt) => (
+            <a
+              key={opt.value}
+              href={`?cat=${categoryFilter}&type=${opt.value}&q=${search}`}
+              className={`px-3 py-0.5 transition-colors ${
+                (params.type ?? "") === opt.value
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              {opt.label}
+            </a>
+          ))}
+        </div>
+      </div>
+
+      {/* ページネーション */}
+      {total > perPage && (
+        <div className="flex justify-end gap-2 mb-4">
+          {page > 1 && (
+            <a
+              href={`?cat=${categoryFilter}&type=${params.type ?? ""}&q=${search}&page=${page - 1}`}
+              className="px-3 py-0.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              前へ
+            </a>
+          )}
+          <span className="px-3 py-0.5 text-sm text-gray-500">
+            {page} / {Math.ceil(total / perPage)}
+          </span>
+          {page < Math.ceil(total / perPage) && (
+            <a
+              href={`?cat=${categoryFilter}&type=${params.type ?? ""}&q=${search}&page=${page + 1}`}
+              className="px-3 py-0.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              次へ
+            </a>
+          )}
+        </div>
+      )}
+
+      {/* テーブル */}
+      <div className="rounded-lg border border-gray-200 overflow-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-gray-700 text-white">
+              <th className="text-left px-3 py-2 font-medium whitespace-nowrap">FNSKU<br /><span className="font-normal text-gray-400">ロジレス識別番号</span></th>
+              <th className="text-left px-3 py-2 font-medium whitespace-nowrap">商品名</th>
+              <th className="text-center px-3 py-2 font-medium whitespace-nowrap">種別</th>
+              <th className="text-right px-3 py-2 font-medium whitespace-nowrap">FBA在庫</th>
+              <th className="text-right px-3 py-2 font-medium whitespace-nowrap">FBA上限</th>
+              <th className="text-right px-3 py-2 font-medium whitespace-nowrap">ロジレス在庫</th>
+              <th className="text-right px-3 py-2 font-medium whitespace-nowrap">3ヶ月売上</th>
+              <th className="text-left px-3 py-2 font-medium whitespace-nowrap">ロケーション</th>
+              <th className="text-left px-3 py-2 font-medium whitespace-nowrap">出荷期限 <span className="font-normal text-gray-400">(14ヶ月以内⚠)</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {products.map((product, idx) => (
+              <InventoryRow
+                key={product.id}
+                product={{
+                  id: product.id,
+                  fnsku: product.fnsku,
+                  sku: product.sku,
+                  name: product.name,
+                  productType: product.productType,
+                  fbaStockQuantity: product.fbaStockQuantity,
+                  fbaStockUpperLimit: product.fbaStockUpperLimit,
+                  business3m: product.business3m,
+                }}
+                lots={product.logilessInventories.map((i) => ({
+                  id: i.id,
+                  location: i.location,
+                  lotNumber: i.lotNumber,
+                  quantity: i.quantity,
+                  expiryDate: i.expiryDate?.toISOString() ?? null,
+                }))}
+                stripe={idx % 2 === 0 ? "bg-white" : "bg-gray-50/70"}
+                minExpiry={minExpiry.toISOString()}
+              />
+            ))}
+          </tbody>
+        </table>
+
+        {products.length === 0 && (
+          <div className="py-12 text-center text-xs text-gray-400">
+            該当する商品がありません
+          </div>
+        )}
+      </div>
+
+    </div>
+  );
+}
