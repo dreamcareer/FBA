@@ -30,6 +30,7 @@ npm install
 # 環境変数設定
 cp .env.example .env.local
 # .env.local を編集
+https://docs.google.com/document/d/1cCpWHhkd0h9ES68jOH-M1bUCQgK1Pb-_vNKefazPHV0/edit?tab=t.0
 
 # DBスキーマ反映
 npm run db:push
