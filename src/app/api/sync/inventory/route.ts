@@ -38,12 +38,11 @@ export async function POST(req: NextRequest) {
   });
 
   try {
-    // Logiless から全在庫取得
-    // LotNumberレベル = ロケーション・有効期限・ロット番号付き
-    // 什器・備品・空箱等（2000...コード）を除外
+    // Logiless から在庫取得（LotNumberレベル、APIでフィルタ済み）
+    // 什器・備品・空箱等（2000...コード）を除外、在庫0を除外
     const allInventories = await fetchActualInventories();
     const inventories = allInventories.filter(
-      (inv) => inv.layer === "LotNumber" && !inv.article.code.startsWith("2000") && (inv.available > 0 || inv.blocked > 0)
+      (inv) => !inv.article.code.startsWith("2000") && (inv.available > 0 || inv.blocked > 0)
     );
 
     // DBの商品マスタから logilessProductCode → id のマップを作成
