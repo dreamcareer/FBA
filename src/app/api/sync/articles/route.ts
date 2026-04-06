@@ -9,10 +9,10 @@ export const maxDuration = 600;
 
 /**
  * POST /api/sync/articles
- * Logiless 商品マスタを同期（詳細取得：FNSKU、フリー項目、原価等を含む）
+ * Logiless 商品マスタを同期
  *
- * 一覧APIで全商品のidentification_codeを取得し、
- * 1件ずつ詳細APIで全フィールドを取得してDBに保存する
+ * ?mode=full  → 全件詳細取得（初回や強制リフレッシュ）
+ * ?mode=diff  → 新規商品のみ詳細取得（デフォルト・高速）
  */
 export async function POST(req: NextRequest) {
   // 認証
@@ -36,11 +36,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const mode = req.nextUrl.searchParams.get("mode") ?? "diff";
+
   try {
     // Step 1: 一覧APIで全商品を取得
     console.log("[sync/articles] Fetching article list...");
     const summaries = await fetchArticles();
-    console.log(`[sync/articles] Found ${summaries.length} articles. Fetching details...`);
+    console.log(`[sync/articles] Found ${summaries.length} articles (mode=${mode})`);
 
     // カテゴリを事前作成
     const categoryNames = new Set<string>(["その他"]);
@@ -58,20 +60,32 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Step 2: 1件ずつ詳細取得してDB保存
+    // 既存商品のSKU一覧を取得
+    const existingProducts = await db.product.findMany({
+      select: { sku: true },
+    });
+    const existingSkus = new Set(existingProducts.map((p) => p.sku));
+
+    // diffモード: 新規商品のみ詳細取得
+    const toFetch = mode === "full"
+      ? summaries
+      : summaries.filter((s) => s.identification_code && !existingSkus.has(s.identification_code));
+
+    console.log(`[sync/articles] Fetching details for ${toFetch.length} articles...`);
+
     let created = 0;
     let updated = 0;
     let skipped = 0;
 
-    for (let i = 0; i < summaries.length; i++) {
-      const summary = summaries[i];
+    for (let i = 0; i < toFetch.length; i++) {
+      const summary = toFetch[i];
       const identCode = summary.identification_code;
       if (!identCode) {
         skipped++;
         continue;
       }
 
-      // 詳細取得（レート制限対策: 200msディレイ）
+      // レート制限対策: 200msディレイ
       if (i > 0) await new Promise((r) => setTimeout(r, 200));
       const detail = await fetchArticleDetail(identCode);
       if (!detail) {
@@ -116,7 +130,7 @@ export async function POST(req: NextRequest) {
       }
 
       if ((i + 1) % 100 === 0) {
-        console.log(`[sync/articles] Progress: ${i + 1}/${summaries.length}`);
+        console.log(`[sync/articles] Progress: ${i + 1}/${toFetch.length}`);
       }
     }
 
@@ -125,6 +139,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       total: summaries.length,
+      fetched: toFetch.length,
       created,
       updated,
       skipped,

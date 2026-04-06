@@ -201,6 +201,7 @@ export async function fetchLogicalInventories(): Promise<LogilessLogicalInventor
 
 /**
  * 実在庫サマリー（ロット・期限別）を全件取得
+ * layer=LotNumber でフィルタし、取得件数を大幅に削減
  */
 export async function fetchActualInventories(
   skus?: string[]
@@ -214,7 +215,7 @@ export async function fetchActualInventories(
 
   while (true) {
     const res = await request<LogilessPagedResponse<LogilessActualInventory>>(
-      `/actual_inventory_summaries?aggregate_type=expiration_date&page=${page}&limit=100${skuQuery}`
+      `/actual_inventory_summaries?aggregate_type=expiration_date&layer=LotNumber&page=${page}&limit=100${skuQuery}`
     );
     all.push(...res.data);
     if (res.data.length < 100) break;
