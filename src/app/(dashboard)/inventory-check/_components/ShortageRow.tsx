@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { getProductColor } from "@/lib/product-colors";
 
 export type ShortageItem = {
   id: string;
@@ -22,8 +23,8 @@ export default function ShortageRow({ item, idx }: { item: ShortageItem; idx: nu
   const [saved, setSaved] = useState(false);
 
   const shortage = item.threshold - item.logilessStock;
-  const stripe = idx % 2 === 0 ? "bg-white" : "bg-gray-50/70";
   const critical = item.logilessStock === 0;
+  const productColor = getProductColor(item.name);
 
   async function handleSave() {
     setSaving(true);
@@ -48,7 +49,7 @@ export default function ShortageRow({ item, idx }: { item: ShortageItem; idx: nu
     (arrivalQty || "") !== (item.nextArrivalQuantity?.toString() ?? "");
 
   return (
-    <tr className={`${stripe} border-b border-gray-100`}>
+    <tr className="hover:bg-gray-50/50 border-b border-gray-100">
       <td className="px-3 py-0.5 text-gray-800 max-w-[300px] truncate" title={item.name}>{item.name}</td>
       <td className="px-3 py-0.5 font-mono text-gray-500 whitespace-nowrap">
         {item.fnsku ?? "—"}<br /><span className="text-gray-400">{item.sku}</span>

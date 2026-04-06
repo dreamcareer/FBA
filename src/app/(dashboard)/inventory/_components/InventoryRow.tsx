@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { getProductColor } from "@/lib/product-colors";
 
 type Lot = {
   id: string;
@@ -29,6 +30,7 @@ type Props = {
 export default function InventoryRow({ product, lots, stripe, minExpiry }: Props) {
   const [open, setOpen] = useState(false);
   const hasLots = lots.length > 1;
+  const productColor = getProductColor(product.name);
 
   const logilessTotal = lots.reduce((s, i) => s + i.quantity, 0);
   const locations = [...new Set(lots.map((i) => i.location).filter(Boolean))];
@@ -45,7 +47,7 @@ export default function InventoryRow({ product, lots, stripe, minExpiry }: Props
   return (
     <>
       <tr
-        className={`${stripe} hover:bg-blue-50/50 border-b border-gray-100 ${hasLots ? "cursor-pointer" : ""}`}
+        className={`hover:bg-gray-50/50 border-b border-gray-100 ${hasLots ? "cursor-pointer" : ""}`}
         onClick={() => hasLots && setOpen(!open)}
       >
         <td className="px-3 py-0.5 font-mono text-gray-500 whitespace-nowrap">

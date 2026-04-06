@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
-import ShortageRow from "./_components/ShortageRow";
+import { getColorName } from "@/lib/product-colors";
+import ColorGroup from "./_components/ColorGroup";
 import type { ShortageItem } from "./_components/ShortageRow";
 
 /**
@@ -158,26 +159,42 @@ export default async function InventoryCheckPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {nonPresc.length > 0 && (
-                      <>
-                        <tr className="bg-teal-50/50">
-                          <td colSpan={8} className="px-3 py-1 text-teal-700 font-medium">度なし ({nonPresc.length})</td>
-                        </tr>
-                        {nonPresc.map((item, idx) => (
-                          <ShortageRow key={item.id} item={item} idx={idx} />
-                        ))}
-                      </>
-                    )}
-                    {presc.length > 0 && (
-                      <>
-                        <tr className="bg-purple-50/50">
-                          <td colSpan={8} className="px-3 py-1 text-purple-700 font-medium">度あり ({presc.length})</td>
-                        </tr>
-                        {presc.map((item, idx) => (
-                          <ShortageRow key={item.id} item={item} idx={idx} />
-                        ))}
-                      </>
-                    )}
+                    {nonPresc.length > 0 && (() => {
+                      const groups = new Map<string, ShortageItem[]>();
+                      nonPresc.forEach((item) => {
+                        const color = getColorName(item.name);
+                        if (!groups.has(color)) groups.set(color, []);
+                        groups.get(color)!.push(item);
+                      });
+                      return (
+                        <>
+                          <tr className="bg-teal-50/50">
+                            <td colSpan={8} className="px-3 py-1 text-teal-700 font-medium">度なし ({nonPresc.length})</td>
+                          </tr>
+                          {[...groups.entries()].map(([colorName, colorItems]) => (
+                            <ColorGroup key={colorName} colorName={colorName} items={colorItems} />
+                          ))}
+                        </>
+                      );
+                    })()}
+                    {presc.length > 0 && (() => {
+                      const groups = new Map<string, ShortageItem[]>();
+                      presc.forEach((item) => {
+                        const color = getColorName(item.name);
+                        if (!groups.has(color)) groups.set(color, []);
+                        groups.get(color)!.push(item);
+                      });
+                      return (
+                        <>
+                          <tr className="bg-purple-50/50">
+                            <td colSpan={8} className="px-3 py-1 text-purple-700 font-medium">度あり ({presc.length})</td>
+                          </tr>
+                          {[...groups.entries()].map(([colorName, colorItems]) => (
+                            <ColorGroup key={colorName} colorName={colorName} items={colorItems} />
+                          ))}
+                        </>
+                      );
+                    })()}
                   </tbody>
                 </table>
               </div>

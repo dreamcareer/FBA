@@ -1,8 +1,9 @@
 import { db } from "@/lib/db";
 import { addMonths } from "date-fns";
+import { getColorName } from "@/lib/product-colors";
 import SyncButton from "./_components/SyncButton";
 import SearchInput from "./_components/SearchInput";
-import InventoryRow from "./_components/InventoryRow";
+import ColorGroup from "./_components/ColorGroup";
 
 const EXPIRY_WARN_MONTHS = 18;
 
@@ -180,30 +181,43 @@ export default async function InventoryPage({
             </tr>
           </thead>
           <tbody>
-            {products.map((product, idx) => (
-              <InventoryRow
-                key={product.id}
-                product={{
-                  id: product.id,
-                  fnsku: product.fnsku,
-                  sku: product.sku,
-                  name: product.name,
-                  productType: product.productType,
-                  fbaStockQuantity: product.fbaStockQuantity,
-                  fbaStockUpperLimit: product.fbaStockUpperLimit,
-                  business3m: product.business3m,
-                }}
-                lots={product.logilessInventories.map((i) => ({
-                  id: i.id,
-                  location: i.location,
-                  lotNumber: i.lotNumber,
-                  quantity: i.quantity,
-                  expiryDate: i.expiryDate?.toISOString() ?? null,
-                }))}
-                stripe={idx % 2 === 0 ? "bg-white" : "bg-gray-50/70"}
-                minExpiry={minExpiry.toISOString()}
-              />
-            ))}
+            {(() => {
+              const groups = new Map<string, { product: typeof products[0]; lots: { id: string; location: string | null; lotNumber: string | null; quantity: number; expiryDate: string | null }[] }[]>();
+              products.forEach((product) => {
+                const color = getColorName(product.name);
+                if (!groups.has(color)) groups.set(color, []);
+                groups.get(color)!.push({
+                  product,
+                  lots: product.logilessInventories.map((i) => ({
+                    id: i.id,
+                    location: i.location,
+                    lotNumber: i.lotNumber,
+                    quantity: i.quantity,
+                    expiryDate: i.expiryDate?.toISOString() ?? null,
+                  })),
+                });
+              });
+              return [...groups.entries()].map(([colorName, items]) => (
+                <ColorGroup
+                  key={colorName}
+                  colorName={colorName}
+                  items={items.map((item) => ({
+                    product: {
+                      id: item.product.id,
+                      fnsku: item.product.fnsku,
+                      sku: item.product.sku,
+                      name: item.product.name,
+                      productType: item.product.productType,
+                      fbaStockQuantity: item.product.fbaStockQuantity,
+                      fbaStockUpperLimit: item.product.fbaStockUpperLimit,
+                      business3m: item.product.business3m,
+                    },
+                    lots: item.lots,
+                  }))}
+                  minExpiry={minExpiry.toISOString()}
+                />
+              ));
+            })()}
           </tbody>
         </table>
 
