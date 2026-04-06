@@ -1,25 +1,38 @@
 # Naturali FBA管理システム
 
-AmazonFBA納品業務の完全API化・自動化システム。  
-スクレイピング（Playwright）→ API連携に移行し、GAS・Dropboxを廃止。
+AmazonFBA納品業務の管理システム。  
+Logiless APIから商品マスタ・在庫データを取得し、在庫管理・洗い出し・納品プラン作成を行う。
+
+## フェーズ
+
+### Phase 1（現在）
+| # | 機能 | 状況 |
+|---|------|------|
+| 1 | **在庫同期** — Logiless APIから全SKUの在庫数を取得しDBに保存 | 完了 |
+| 2 | **在庫一覧** — ロジレス在庫・ロケーション・出荷期限を一画面で確認 | 完了 |
+| 3 | **在庫洗い出し** — 閾値以下の商品を自動検出、次回入荷情報の手動入力 | 完了 |
+| 4 | **仮プラン作成** — 業務ルールに基づく納品数の自動計算 | 画面あり（FBA在庫・売上データはSP-API連携後） |
+| 5 | **ロジレス受注登録** — 納品プランをLogiless APIに受注伝票として登録 | コードあり（SP-API連携後に本番運用可能） |
+
+### Phase 2（SP-API取得後）
+| # | 機能 |
+|---|------|
+| 6 | FBA在庫・売上データの自動同期（SP-API → DB、毎日バッチ） |
+| 7 | Seller Centralでの納品プラン自動作成（SP-API） |
+| 8 | FNSKUラベルの自動取得・Supabase Storageに保存 |
+
+> Phase 2が完了するとPhase 1の仮プラン作成・受注登録がFBA在庫・売上データ付きで本番運用可能になる
 
 ## 技術スタック
 
 | 役割 | 技術 |
 |---|---|
-| フロントエンド / API | Next.js 14 (App Router) + TypeScript |
+| フロントエンド / API | Next.js 16 (App Router) + TypeScript |
 | DB | Supabase (PostgreSQL) |
 | ORM | Prisma |
 | 認証 | Supabase Auth |
 | スタイリング | Tailwind CSS |
-| ホスティング | Vercel (フロント) + Supabase (DB) |
-
-## フェーズ
-
-| Phase | 内容 | ステータス |
-|---|---|---|
-| Phase 1 | Logiless API連携・納品数計算・ロジレス受注登録 | 実装済み |
-| Phase 2 | SP-API連携・FBA在庫同期・納品プラン自動作成 | SP-API取得後に実装 |
+| 外部API | Logiless API (OAuth2) |
 
 ## セットアップ
 
@@ -28,94 +41,98 @@ AmazonFBA納品業務の完全API化・自動化システム。
 npm install
 
 # 環境変数設定
-cp .env.example .env.local
-# .env.local を編集
-envのurl (https://docs.google.com/document/d/1cCpWHhkd0h9ES68jOH-M1bUCQgK1Pb-_vNKefazPHV0/edit?tab=t.0)
+cp .env.example .env
+# .env を編集
 
 # DBスキーマ反映
 npm run db:push
 
+# Prisma Client生成
+npx prisma generate
+
 # 開発サーバー起動
 npm run dev
 ```
+
+### Logiless OAuth2認証（初回のみ）
+
+1. `npm run dev` でサーバー起動
+2. `http://localhost:3000/api/logiless/authorize` にアクセス
+3. Logiless認可画面で許可
+4. トークンがDBに自動保存される
+
+## 環境変数
+
+| 変数 | 説明 |
+|---|---|
+| `DATABASE_URL` | Supabase DB接続文字列 |
+| `DIRECT_URL` | Supabase DB直接接続文字列 |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase Project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key |
+| `LOGILESS_CLIENT_ID` | Logiless OAuth2 Client ID |
+| `LOGILESS_CLIENT_SECRET` | Logiless OAuth2 Client Secret |
+| `LOGILESS_REDIRECT_URI` | Logiless OAuth2 Redirect URI |
+| `LOGILESS_MERCHANT_ID` | Logiless Merchant ID |
+| `LOGILESS_BASE_URL` | Logiless API Base URL |
 
 ## ディレクトリ構成
 
 ```
 src/
 ├── app/
-│   ├── (auth)/login/          # ログイン画面
+│   ├── (auth)/login/                # ログイン画面
 │   ├── (dashboard)/
-│   │   ├── inventory/         # 在庫一覧
-│   │   ├── provisional-plan/  # 仮プラン作成
-│   │   └── delivery-plan/     # 納品プラン管理
+│   │   ├── inventory/               # 在庫一覧
+│   │   ├── inventory-check/         # 在庫洗い出し
+│   │   ├── provisional-plan/        # 仮プラン作成
+│   │   └── delivery-plan/           # 納品プラン管理
 │   └── api/
-│       ├── sync/inventory/    # Logiless在庫同期
+│       ├── sync/
+│       │   ├── articles/            # 商品マスタ同期（詳細取得）
+│       │   └── inventory/           # ロット別在庫同期
+│       ├── logiless/
+│       │   ├── authorize/           # OAuth2認可開始
+│       │   └── callback/            # OAuth2コールバック
+│       ├── products/arrival/        # 次回入荷情報更新
 │       ├── delivery-plan/
-│       │   ├── calculate/     # 納品数計算
-│       │   └── create/        # プラン作成・ロジレス登録
-│       └── notify/            # Discord/Chatwork通知
+│       │   ├── calculate/           # 納品数計算
+│       │   └── create/              # プラン作成・ロジレス登録
+│       └── notify/                  # Discord/Chatwork通知
 ├── lib/
-│   ├── db.ts                  # Prismaクライアント
-│   ├── logiless/              # Logiless APIクライアント
-│   ├── sp-api/                # SP-APIクライアント（Phase 2）
-│   ├── delivery/              # 納品数計算エンジン
-│   ├── notify.ts              # 通知ユーティリティ
-│   └── supabase.ts            # Supabaseクライアント
-└── types/                     # 共通型定義
+│   ├── db.ts                        # Prismaクライアント
+│   ├── product-colors.ts            # 商品カラー判定
+│   ├── logiless/
+│   │   ├── client.ts                # Logiless APIクライアント（OAuth2 + リトライ）
+│   │   ├── types.ts                 # 型定義
+│   │   └── categories.ts            # SKUカテゴリ判定
+│   ├── delivery/                    # 納品数計算エンジン
+│   ├── notify.ts                    # 通知ユーティリティ
+│   ├── supabase.ts                  # Supabaseブラウザクライアント
+│   └── supabase-server.ts           # Supabaseサーバークライアント
+└── middleware.ts                    # 認証ミドルウェア
 ```
 
 ## 主要API
 
+### `POST /api/sync/articles`
+Logiless商品マスタを全件同期。一覧APIで全商品のidentification_codeを取得後、1件ずつ詳細API（FNSKU、フリー項目、原価等）を取得してDBに保存。初回は約9分かかる。
+
 ### `POST /api/sync/inventory`
-Logilessからロット別在庫を取得してDBに同期する。
+Logilessからロット別在庫（LotNumberレベル）を取得してDBに同期。ロケーション・出荷期限・ロット番号付き。
+
+### `PUT /api/products/arrival`
+次回入荷予定日・次回入荷数を手動更新。
 
 ### `POST /api/delivery-plan/calculate`
 業務ルールに基づいて納品予定数を計算する（DB保存なし）。
 
-```json
-{
-  "productType": "WITH_PRESCRIPTION",
-  "targetTotal": 500,
-  "startFromSku": "1d10hi145mh"
-}
-```
-
 ### `POST /api/delivery-plan/create`
 納品プランをDBに保存しロジレスに受注登録する。
 
-```json
-{
-  "items": [{ "productId": "...", "quantity": 10, "expiryDate": "2027-06-01" }],
-  "shipmentDate": "2026-01-08T00:00:00.000Z",
-  "logilessOrderCode": "STA20260106-1"
-}
-```
+## 在庫洗い出し閾値
 
-## Phase 2 実装時の作業
-
-1. `src/lib/sp-api/client.ts` の各関数を実装
-2. `POST /api/sync/inventory` にFBA在庫同期を追加
-3. `POST /api/delivery-plan/create` にSP-API納品プラン作成を追加
-4. Vercel Cron Jobs で定期同期をスケジュール設定
-
-## 業務ルール（計算エンジン）
-
-`src/lib/delivery/calculator.ts` に実装。
-
-**度あり**
-- FBA在庫=0 → 20個
-- FBA在庫≤15 かつ 3ヶ月売上≥5 → 10個
-- FBA在庫<10 → 10個
-- 目標: 500点/バッチ
-
-**度なし**
-- FBA在庫=0 → 50個
-- FBA在庫 < 3ヶ月売上×1.2 → 差分を補充（10〜100個、10刻み）
-- 目標: 1000点/バッチ
-
-**共通**
-- 有効期限14ヶ月未満は納品不可
-- 14〜18ヶ月は警告表示
-- 終売商品はスキップ
-- ロジレス在庫は最低確保数を控除して計算
+| 枚数 | 度なし | 度あり |
+|------|--------|--------|
+| 10枚入 | 300未満 | 30未満 |
+| 30枚入 | 150未満 | 20未満 |
