@@ -1,101 +1,78 @@
-import { db } from "@/lib/db";
+"use client";
+
+import { useEffect, useState } from "react";
 import { getColorName } from "@/lib/product-colors";
+import { sortCategories, type CheckResult, type ShortageItem } from "@/lib/inventory-check";
 import ColorGroup from "./_components/ColorGroup";
-import type { ShortageItem } from "./_components/ShortageRow";
 
-/**
- * SKUから枚数（10枚/30枚）を判定
- */
-function getQuantityFromSku(sku: string): number | null {
-  const s = sku.toLowerCase();
-  if (s.includes("1d10") || s.startsWith("1d-") || s.startsWith("u0-") || s.startsWith("u5-") || s.startsWith("h2-") || s.startsWith("h1-") || s.startsWith("h5-") || s.startsWith("ph2-") || s.startsWith("p2-10-") || s.startsWith("s1-10-") || s.startsWith("cl-") || s.startsWith("c1d10")) return 10;
-  if (s.startsWith("2d-") || s.startsWith("s1-30-") || s.startsWith("pn-30-") || s.startsWith("pc-30-") || s.startsWith("h-30-") || s.startsWith("c1d30")) return 30;
-  if (s.startsWith("1m-") || s.startsWith("m1-2-")) return 10;
-  return null;
-}
+export default function InventoryCheckPage() {
+  const [result, setResult] = useState<CheckResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
 
-function getThreshold(quantity: number | null, isPrescription: boolean): number | null {
-  if (quantity === 10) return isPrescription ? 30 : 300;
-  if (quantity === 30) return isPrescription ? 20 : 150;
-  return null;
-}
+  // 初回: キャッシュされた結果を読み込み
+  useEffect(() => {
+    fetch("/api/inventory-check")
+      .then((r) => r.json())
+      .then((data) => setResult(data.result))
+      .finally(() => setInitialLoading(false));
+  }, []);
 
-const CATEGORY_ORDER = [
-  "1day10P", "1day30P", "高含水等", "Pixie",
-  "ハイドロゲル", "UVチャーミング", "UVピュア", "1m2p",
-  "色なしコンタクト", "Charm10P", "Charm30P",
-];
-
-export default async function InventoryCheckPage() {
-  const products = await db.product.findMany({
-    where: { isActive: true },
-    include: {
-      logilessInventories: true,
-      category: true,
-    },
-    orderBy: { sku: "asc" },
-  });
-
-  const shortagesByCategory = new Map<string, ShortageItem[]>();
-
-  for (const product of products) {
-    const logilessTotal = product.logilessInventories.reduce((s, i) => s + i.quantity, 0);
-    const isPrescription = product.productType === "WITH_PRESCRIPTION";
-    const quantity = getQuantityFromSku(product.sku);
-    const threshold = getThreshold(quantity, isPrescription);
-
-    if (threshold === null) continue;
-    if (logilessTotal >= threshold) continue;
-
-    const categoryName = product.category.name;
-    const item: ShortageItem = {
-      id: product.id,
-      name: product.name,
-      sku: product.sku,
-      fnsku: product.fnsku,
-      logilessStock: logilessTotal,
-      threshold,
-      isPrescription,
-      categoryName,
-      nextArrivalDate: product.nextArrivalDate?.toISOString().slice(0, 10) ?? null,
-      nextArrivalQuantity: product.nextArrivalQuantity,
-    };
-
-    if (!shortagesByCategory.has(categoryName)) {
-      shortagesByCategory.set(categoryName, []);
-    }
-    shortagesByCategory.get(categoryName)!.push(item);
+  async function handleRun() {
+    setLoading(true);
+    const res = await fetch("/api/inventory-check", { method: "POST" });
+    const data = await res.json();
+    setResult(data);
+    setLoading(false);
   }
 
-  const sortedCategories = [...shortagesByCategory.keys()].sort((a, b) => {
-    const ai = CATEGORY_ORDER.indexOf(a);
-    const bi = CATEGORY_ORDER.indexOf(b);
-    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-  });
+  if (initialLoading) {
+    return (
+      <div className="p-6">
+        <p className="text-sm text-gray-500">読み込み中...</p>
+      </div>
+    );
+  }
 
-  const totalCount = [...shortagesByCategory.values()].reduce((s, items) => s + items.length, 0);
-  const now = new Date().toLocaleString("ja-JP", {
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit",
-  });
+  const shortagesByCategory = result?.shortagesByCategory ?? {};
+  const sortedCategories = sortCategories(Object.keys(shortagesByCategory));
+  const totalCount = result?.totalCount ?? 0;
+  const executedAt = result?.executedAt
+    ? new Date(result.executedAt).toLocaleString("ja-JP", {
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit",
+      })
+    : null;
 
   return (
     <div id="top" className="p-6">
-      <div className="mb-6">
-        <h1 className="text-lg font-semibold text-gray-900">在庫洗い出し</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          ロジレス在庫が閾値を下回っている商品の一覧
-        </p>
+      {/* ヘッダー */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900">在庫洗い出し</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            ロジレス在庫が閾値を下回っている商品の一覧
+          </p>
+        </div>
+        <button
+          onClick={handleRun}
+          disabled={loading}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+        >
+          <span className={loading ? "animate-spin" : ""}>🔍</span>
+          {loading ? "実行中..." : "洗い出し実行"}
+        </button>
       </div>
 
+      {/* サマリー */}
       <div className="flex gap-4 mb-6">
         <div className="bg-red-50 border border-red-200 rounded-lg px-5 py-3">
           <p className="text-xs text-red-600">在庫不足</p>
           <p className="text-2xl font-bold text-red-700">{totalCount}<span className="text-sm font-normal ml-1">件</span></p>
         </div>
         <div className="bg-gray-50 border border-gray-200 rounded-lg px-5 py-3">
-          <p className="text-xs text-gray-500">更新日時</p>
-          <p className="text-sm font-medium text-gray-700 mt-1">{now}</p>
+          <p className="text-xs text-gray-500">最終実行日時</p>
+          <p className="text-sm font-medium text-gray-700 mt-1">{executedAt ?? "未実行"}</p>
         </div>
         <div className="bg-blue-50 border border-blue-200 rounded-lg px-5 py-3">
           <p className="text-xs text-blue-600">閾値</p>
@@ -121,22 +98,40 @@ export default async function InventoryCheckPage() {
               href={`#cat-${name}`}
               className="px-3 py-0.5 rounded-lg text-xs font-medium transition-colors bg-gray-100 text-gray-600 hover:bg-gray-200"
             >
-              {name} ({shortagesByCategory.get(name)!.length})
+              {name} ({shortagesByCategory[name].length})
             </a>
           ))}
         </div>
       )}
 
-      {totalCount === 0 ? (
+      {!result ? (
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
+          <p className="text-gray-500">「洗い出し実行」ボタンを押してください</p>
+        </div>
+      ) : totalCount === 0 ? (
         <div className="bg-green-50 border border-green-200 rounded-lg p-8 text-center">
           <p className="text-green-700 font-medium">在庫不足の商品はありません</p>
         </div>
       ) : (
         <div className="space-y-6">
           {sortedCategories.map((categoryName) => {
-            const items = shortagesByCategory.get(categoryName)!;
-            const nonPresc = items.filter((i) => !i.isPrescription);
-            const presc = items.filter((i) => i.isPrescription);
+            const items = shortagesByCategory[categoryName];
+            const nonPresc = items.filter((i: ShortageItem) => !i.isPrescription);
+            const presc = items.filter((i: ShortageItem) => i.isPrescription);
+
+            // カラー別グループ化
+            const groupByColor = (list: ShortageItem[]) => {
+              const groups = new Map<string, ShortageItem[]>();
+              list.forEach((item) => {
+                const color = getColorName(item.name);
+                if (!groups.has(color)) groups.set(color, []);
+                groups.get(color)!.push(item);
+              });
+              return groups;
+            };
+
+            const nonPrescGroups = groupByColor(nonPresc);
+            const prescGroups = groupByColor(presc);
 
             return (
               <div key={categoryName} id={`cat-${categoryName}`} className="rounded-lg border border-gray-200 overflow-hidden scroll-mt-16">
@@ -159,42 +154,26 @@ export default async function InventoryCheckPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {nonPresc.length > 0 && (() => {
-                      const groups = new Map<string, ShortageItem[]>();
-                      nonPresc.forEach((item) => {
-                        const color = getColorName(item.name);
-                        if (!groups.has(color)) groups.set(color, []);
-                        groups.get(color)!.push(item);
-                      });
-                      return (
-                        <>
-                          <tr className="bg-teal-50/50">
-                            <td colSpan={8} className="px-3 py-1 text-teal-700 font-medium">度なし ({nonPresc.length})</td>
-                          </tr>
-                          {[...groups.entries()].map(([colorName, colorItems]) => (
-                            <ColorGroup key={colorName} colorName={colorName} items={colorItems} />
-                          ))}
-                        </>
-                      );
-                    })()}
-                    {presc.length > 0 && (() => {
-                      const groups = new Map<string, ShortageItem[]>();
-                      presc.forEach((item) => {
-                        const color = getColorName(item.name);
-                        if (!groups.has(color)) groups.set(color, []);
-                        groups.get(color)!.push(item);
-                      });
-                      return (
-                        <>
-                          <tr className="bg-purple-50/50">
-                            <td colSpan={8} className="px-3 py-1 text-purple-700 font-medium">度あり ({presc.length})</td>
-                          </tr>
-                          {[...groups.entries()].map(([colorName, colorItems]) => (
-                            <ColorGroup key={colorName} colorName={colorName} items={colorItems} />
-                          ))}
-                        </>
-                      );
-                    })()}
+                    {nonPresc.length > 0 && (
+                      <>
+                        <tr className="bg-teal-50/50">
+                          <td colSpan={8} className="px-3 py-1 text-teal-700 font-medium">度なし ({nonPresc.length})</td>
+                        </tr>
+                        {[...nonPrescGroups.entries()].map(([colorName, colorItems]) => (
+                          <ColorGroup key={colorName} colorName={colorName} items={colorItems} />
+                        ))}
+                      </>
+                    )}
+                    {presc.length > 0 && (
+                      <>
+                        <tr className="bg-purple-50/50">
+                          <td colSpan={8} className="px-3 py-1 text-purple-700 font-medium">度あり ({presc.length})</td>
+                        </tr>
+                        {[...prescGroups.entries()].map(([colorName, colorItems]) => (
+                          <ColorGroup key={colorName} colorName={colorName} items={colorItems} />
+                        ))}
+                      </>
+                    )}
                   </tbody>
                 </table>
               </div>

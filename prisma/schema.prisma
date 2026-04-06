@@ -163,6 +163,16 @@ enum SyncStatus {
   FAILED
 }
 
+// ── 在庫洗い出し結果 ──────────────────────────────────────
+model InventoryCheckResult {
+  id           String   @id @default(cuid())
+  executedAt   DateTime @default(now()) @map("executed_at")
+  totalCount   Int      @map("total_count")
+  data         String   @db.Text // JSON文字列で結果を保存
+
+  @@map("inventory_check_results")
+}
+
 // ── OAuthトークン ─────────────────────────────────────────
 model OAuthToken {
   id           String   @id @default(cuid())
