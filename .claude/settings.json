@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(npm run lint)",
+      "Bash(npm run build)",
+      "Bash(npx prisma generate)",
+      "Bash(npx prisma format)",
+      "Bash(npx prisma validate)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git branch*)",
+      "Bash(ls *)"
+    ],
+    "deny": [
+      "Bash(rm -rf /)",
+      "Bash(*DROP TABLE*)",
+      "Bash(*--force*)",
+      "Bash(git push --force*)",
+      "Bash(*SUPABASE_SERVICE_ROLE_KEY*)",
+      "Bash(*LOGILESS_CLIENT_SECRET*)"
+    ]
+  },
+  "hooks": {
+    "preToolCall": [
+      {
+        "matcher": "Edit|Write",
+        "hook": "npx eslint --no-error-on-unmatched-pattern $CLAUDE_FILE_PATH 2>/dev/null || true"
+      }
+    ],
+    "postToolCall": [
+      {
+        "matcher": "Edit|Write",
+        "hook": "npx eslint --fix --no-error-on-unmatched-pattern $CLAUDE_FILE_PATH 2>/dev/null || true"
+      }
+    ]
+  }
+}
