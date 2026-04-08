@@ -4,8 +4,8 @@ import { db } from "@/lib/db";
 import { fetchArticles, fetchArticleDetail } from "@/lib/logiless/client";
 import { getCategoryFromCode, getProductType } from "@/lib/logiless/categories";
 
-// 長時間実行を許可（最大10分）
-export const maxDuration = 600;
+// 長時間実行を許可（Vercel Hobbyプランは最大300秒）
+export const maxDuration = 300;
 
 /**
  * POST /api/sync/articles
