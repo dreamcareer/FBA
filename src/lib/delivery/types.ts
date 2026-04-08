@@ -5,6 +5,7 @@ export interface ProductForCalculation {
   sku: string;
   name: string;
   productType: ProductType;
+  categoryName: string;
   fbaStockQuantity: number;
   fbaStockUpperLimit: number | null;
   logilessStockReserve: number;
@@ -24,6 +25,7 @@ export interface DeliveryCalculationResult {
   productId: string;
   sku: string;
   name: string;
+  categoryName: string;
   suggestedQuantity: number;
   lotNumber: string | null;
   expiryDate: Date | null;
@@ -43,4 +45,5 @@ export interface CalculationSummary {
   totalQuantity: number;
   deliverableCount: number;
   skippedCount: number;
+  categoriesUsed: string[];
 }

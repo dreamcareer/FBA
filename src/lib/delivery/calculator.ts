@@ -88,18 +88,22 @@ function isExpiryWarning(expiryDate: Date | null): boolean {
 function calcWithPrescription(
   product: ProductForCalculation
 ): { quantity: number; skipReason: SkipReason | null } {
-  const { fbaStockQuantity, business3m } = product;
+  const { fbaStockQuantity, fbaStockUpperLimit } = product;
 
-  if (fbaStockQuantity === 0) {
-    return { quantity: 20, skipReason: null };
+  // FBA上限が未設定の場合はスキップ
+  if (fbaStockUpperLimit === null) {
+    return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
   }
-  if (fbaStockQuantity <= 15 && (business3m ?? 0) >= 5) {
-    return { quantity: WITH_PRES_QTY_MIN, skipReason: null };
+
+  // FBA上限 - FBA在庫 = 不足数
+  const needed = fbaStockUpperLimit - fbaStockQuantity;
+  if (needed <= 0) {
+    return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
   }
-  if (fbaStockQuantity < 10) {
-    return { quantity: WITH_PRES_QTY_MIN, skipReason: null };
-  }
-  return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
+
+  // 10〜30の範囲でstep 10に丸める
+  const qty = clampToRange(needed, WITH_PRES_QTY_MIN, WITH_PRES_QTY_MAX, WITH_PRES_QTY_STEP);
+  return { quantity: qty, skipReason: null };
 }
 
 // ── 度なし 計算 ───────────────────────────────────────────
@@ -107,19 +111,22 @@ function calcWithPrescription(
 function calcWithoutPrescription(
   product: ProductForCalculation
 ): { quantity: number; skipReason: SkipReason | null } {
-  const { fbaStockQuantity, business3m } = product;
-  const monthly3m = business3m ?? 0;
-  const target = monthly3m * 1.2;
+  const { fbaStockQuantity, fbaStockUpperLimit } = product;
 
-  if (fbaStockQuantity === 0) {
-    return { quantity: 50, skipReason: null };
+  // FBA上限が未設定の場合はスキップ
+  if (fbaStockUpperLimit === null) {
+    return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
   }
-  if (fbaStockQuantity < target) {
-    const needed = target - fbaStockQuantity;
-    const qty = clampToRange(needed, WITHOUT_PRES_QTY_MIN, WITHOUT_PRES_QTY_MAX, WITHOUT_PRES_QTY_STEP);
-    return { quantity: qty, skipReason: null };
+
+  // FBA上限 - FBA在庫 = 不足数
+  const needed = fbaStockUpperLimit - fbaStockQuantity;
+  if (needed <= 0) {
+    return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
   }
-  return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
+
+  // 10〜100の範囲でstep 10に丸める
+  const qty = clampToRange(needed, WITHOUT_PRES_QTY_MIN, WITHOUT_PRES_QTY_MAX, WITHOUT_PRES_QTY_STEP);
+  return { quantity: qty, skipReason: null };
 }
 
 // ── メイン計算 ────────────────────────────────────────────
@@ -131,6 +138,7 @@ export function calculateDeliveryQuantity(
     productId: product.id,
     sku: product.sku,
     name: product.name,
+    categoryName: product.categoryName,
     suggestedQuantity: 0,
     lotNumber: null,
     expiryDate: null,
@@ -146,23 +154,18 @@ export function calculateDeliveryQuantity(
   // 納品可能ロット取得
   const deliverableLots = getDeliverableLots(product.logilessInventories);
 
+  // ロジレスに残す在庫数（Pixie: 35、その他: 25）
+  const reserve = product.categoryName === "Pixie" ? 35 : 25;
+
   // 利用可能在庫の合計（reserve控除後）
   const totalDeliverable = deliverableLots.reduce((sum, l) => sum + l.quantity, 0);
-  const availableForDelivery = totalDeliverable - product.logilessStockReserve;
+  const availableForDelivery = totalDeliverable - reserve;
 
   if (availableForDelivery <= 0) {
     return { ...baseResult, skipReason: "NO_LOGILESS_STOCK" };
   }
 
-  // FBA上限チェック
-  if (product.fbaStockUpperLimit !== null) {
-    const room = product.fbaStockUpperLimit - product.fbaStockQuantity;
-    if (room <= 0) {
-      return { ...baseResult, skipReason: "UPPER_LIMIT_REACHED" };
-    }
-  }
-
-  // 種別ごとに計算
+  // 種別ごとに計算（FBA上限チェック含む）
   const { quantity, skipReason } =
     product.productType === "WITH_PRESCRIPTION"
       ? calcWithPrescription(product)
@@ -178,19 +181,13 @@ export function calculateDeliveryQuantity(
     return { ...baseResult, skipReason: "NO_LOGILESS_STOCK" };
   }
 
-  // FBA上限に合わせてクリップ
-  const cappedQuantity =
-    product.fbaStockUpperLimit !== null
-      ? Math.min(finalQuantity, product.fbaStockUpperLimit - product.fbaStockQuantity)
-      : finalQuantity;
-
   // 使用するロットを特定（期限の近い順）
   const usedLot = deliverableLots[0];
   const expiryDate = usedLot?.expiryDate ?? null;
 
   return {
     ...baseResult,
-    suggestedQuantity: cappedQuantity,
+    suggestedQuantity: finalQuantity,
     lotNumber: usedLot?.lotNumber ?? null,
     expiryDate,
     expiryWarning: isExpiryWarning(expiryDate),
@@ -201,8 +198,10 @@ export function calculateDeliveryQuantity(
 // ── バッチ計算 ────────────────────────────────────────────
 
 export interface BatchCalculationOptions {
-  targetTotal: number;      // 目標合計（度あり:500、度なし:1000）
-  maxPerPlan: number;       // 1プランあたり最大SKU数（300）
+  targetTotal: number;       // 目標合計（度あり:500、度なし:1000）
+  maxPerPlan: number;        // 1プランあたり最大SKU数（300）
+  maxCategories?: number;    // 度あり: 最大3カテゴリ、度なし: 1カテゴリ
+  categoryOrder: string[];   // カテゴリ優先順
 }
 
 export function calculateBatch(
@@ -211,22 +210,37 @@ export function calculateBatch(
 ): CalculationSummary {
   const results: DeliveryCalculationResult[] = [];
   let runningTotal = 0;
+  const categoriesUsed: string[] = [];
+  const maxCats = options.maxCategories ?? options.categoryOrder.length;
 
-  for (const product of products) {
-    const result = calculateDeliveryQuantity(product);
-    results.push(result);
+  // カテゴリ順に処理
+  for (const categoryName of options.categoryOrder) {
+    // カテゴリ上限に達したら終了
+    if (categoriesUsed.length >= maxCats) break;
 
-    if (!result.skipReason) {
-      runningTotal += result.suggestedQuantity;
-      // 目標を超えたら以降の数量を調整
-      if (runningTotal > options.targetTotal * 1.1) {
-        result.suggestedQuantity = Math.max(
-          0,
-          result.suggestedQuantity - (runningTotal - options.targetTotal)
-        );
-        runningTotal = options.targetTotal;
+    const categoryProducts = products.filter(
+      (p) => p.categoryName === categoryName
+    );
+    if (categoryProducts.length === 0) continue;
+
+    let categoryHasDeliverable = false;
+
+    for (const product of categoryProducts) {
+      const result = calculateDeliveryQuantity(product);
+      results.push(result);
+
+      if (!result.skipReason) {
+        runningTotal += result.suggestedQuantity;
+        categoryHasDeliverable = true;
       }
     }
+
+    if (categoryHasDeliverable) {
+      categoriesUsed.push(categoryName);
+    }
+
+    // 目標超えたら次のカテゴリに進まない
+    if (runningTotal >= options.targetTotal) break;
   }
 
   const deliverable = results.filter((r) => !r.skipReason);
@@ -237,5 +251,6 @@ export function calculateBatch(
     totalQuantity: deliverable.reduce((s, r) => s + r.suggestedQuantity, 0),
     deliverableCount: deliverable.length,
     skippedCount: skipped.length,
+    categoriesUsed,
   };
 }

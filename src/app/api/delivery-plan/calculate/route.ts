@@ -4,10 +4,20 @@ import { db } from "@/lib/db";
 import { calculateBatch } from "@/lib/delivery/calculator";
 import type { ProductForCalculation } from "@/lib/delivery/types";
 
+// 度あり用カテゴリ優先順
+const PRESCRIPTION_CATEGORY_ORDER = [
+  "1day10P", "1day30P", "高含水等", "Pixie",
+  "ハイドロゲル", "UVチャーミング", "UVピュア", "1m2p",
+  "色なしコンタクト", "Charm10P", "Charm30P",
+];
+
+// 度なし用カテゴリ
+const WITHOUT_PRESCRIPTION_CATEGORY_ORDER = ["度なし"];
+
 const schema = z.object({
   productType: z.enum(["WITH_PRESCRIPTION", "WITHOUT_PRESCRIPTION"]),
   targetTotal: z.number().int().min(100).max(2000),
-  startFromSku: z.string().optional(),
+  selectedCategories: z.array(z.string()).min(1).max(3).optional(),
 });
 
 /**
@@ -25,9 +35,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { productType, targetTotal, startFromSku } = parsed.data;
+  const { productType, targetTotal, selectedCategories } = parsed.data;
 
-  // 対象商品を取得（ロジレス在庫含む）
+  const isWithPrescription = productType === "WITH_PRESCRIPTION";
+  const categoryOrder = isWithPrescription
+    ? (selectedCategories ?? PRESCRIPTION_CATEGORY_ORDER.slice(0, 3))
+    : WITHOUT_PRESCRIPTION_CATEGORY_ORDER;
+  const maxCategories = categoryOrder.length;
+
+  // 対象商品を取得（ロジレス在庫・カテゴリ含む）
   const products = await db.product.findMany({
     where: {
       productType,
@@ -35,22 +51,18 @@ export async function POST(req: NextRequest) {
     },
     include: {
       logilessInventories: true,
+      category: { select: { name: true } },
     },
     orderBy: { sku: "asc" },
   });
 
-  // startFromSku が指定されている場合はそのSKU以降を対象にする
-  const startIndex = startFromSku
-    ? products.findIndex((p) => p.sku >= startFromSku)
-    : 0;
-  const targetProducts = products.slice(Math.max(startIndex, 0));
-
   // 計算用の型に変換
-  const productsForCalc: ProductForCalculation[] = targetProducts.map((p) => ({
+  const productsForCalc: ProductForCalculation[] = products.map((p) => ({
     id: p.id,
     sku: p.sku,
     name: p.name,
     productType: p.productType,
+    categoryName: p.category.name,
     fbaStockQuantity: p.fbaStockQuantity,
     fbaStockUpperLimit: p.fbaStockUpperLimit,
     logilessStockReserve: p.logilessStockReserve,
@@ -65,13 +77,19 @@ export async function POST(req: NextRequest) {
   }));
 
   const maxPerPlan = 300;
-  const summary = calculateBatch(productsForCalc, { targetTotal, maxPerPlan });
+  const summary = calculateBatch(productsForCalc, {
+    targetTotal,
+    maxPerPlan,
+    maxCategories,
+    categoryOrder,
+  });
 
   return NextResponse.json({
     summary: {
       totalQuantity: summary.totalQuantity,
       deliverableCount: summary.deliverableCount,
       skippedCount: summary.skippedCount,
+      categoriesUsed: summary.categoriesUsed,
     },
     results: summary.results,
     lastSku:

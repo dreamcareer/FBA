@@ -63,11 +63,11 @@ export default function InventoryRow({ product, lots, stripe, minExpiry }: Props
             ? <span className="text-purple-600">度あり</span>
             : <span className="text-teal-600">度なし</span>}
         </td>
-        <td className={`px-3 py-0.5 text-right tabular-nums ${isLowFba ? "text-red-600 font-semibold" : "text-gray-700"}`}>
-          {product.fbaStockQuantity.toLocaleString()}
-        </td>
         <td className="px-3 py-0.5 text-right tabular-nums text-gray-400">
           {product.fbaStockUpperLimit?.toLocaleString() ?? "—"}
+        </td>
+        <td className={`px-3 py-0.5 text-right tabular-nums ${isLowFba ? "text-red-600 font-semibold" : "text-gray-700"}`}>
+          {product.fbaStockQuantity.toLocaleString()}
         </td>
         <td className={`px-3 py-0.5 text-right tabular-nums font-semibold ${logilessTotal === 0 ? "text-red-500" : "text-gray-800"}`}>
           {logilessTotal.toLocaleString()}

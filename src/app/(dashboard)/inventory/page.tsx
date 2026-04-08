@@ -10,14 +10,9 @@ const EXPIRY_WARN_MONTHS = 18;
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ type?: string; cat?: string; q?: string; page?: string }>;
+  searchParams: Promise<{ cat?: string; q?: string; page?: string }>;
 }) {
   const params = await searchParams;
-  const productType = params.type === "WITH_PRESCRIPTION"
-    ? "WITH_PRESCRIPTION" as const
-    : params.type === "WITHOUT_PRESCRIPTION"
-    ? "WITHOUT_PRESCRIPTION" as const
-    : undefined;
   const categoryFilter = params.cat ?? "";
   const search = params.q ?? "";
   const page = Number(params.page ?? 1);
@@ -25,27 +20,31 @@ export default async function InventoryPage({
 
   // カテゴリ一覧を取得（タブ表示用・表示順固定）
   const CATEGORY_ORDER = [
-    "度なし", "1day10P", "1day30P", "高含水等", "Pixie",
+    "1day10P", "1day30P", "高含水等", "Pixie",
     "ハイドロゲル", "UVチャーミング", "UVピュア", "1m2p",
     "色なしコンタクト", "Charm10P", "Charm30P",
   ];
+  const HIDDEN_CATEGORIES = ["その他"];
   const allCategories = await db.productCategory.findMany({
     select: { id: true, name: true },
   });
-  const categories = allCategories.sort((a, b) => {
-    const ai = CATEGORY_ORDER.indexOf(a.name);
-    const bi = CATEGORY_ORDER.indexOf(b.name);
-    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-  });
+  const categories = allCategories
+    .filter((c) => !HIDDEN_CATEGORIES.includes(c.name))
+    .sort((a, b) => {
+      const ai = CATEGORY_ORDER.indexOf(a.name);
+      const bi = CATEGORY_ORDER.indexOf(b.name);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
 
-  // カテゴリIDを特定
-  const selectedCategory = categoryFilter
+  // 「度なし」は商品種別でフィルター、それ以外はカテゴリでフィルター
+  const isDoNashi = categoryFilter === "度なし";
+  const selectedCategory = !isDoNashi && categoryFilter
     ? categories.find((c) => c.name === categoryFilter)
     : undefined;
 
   const where = {
     isActive: true,
-    ...(productType ? { productType } : {}),
+    ...(isDoNashi ? { productType: "WITHOUT_PRESCRIPTION" as const } : {}),
     ...(selectedCategory ? { categoryId: selectedCategory.id } : {}),
     ...(search
       ? {
@@ -91,19 +90,19 @@ export default async function InventoryPage({
       {/* カテゴリタブ */}
       <div className="flex flex-wrap gap-1.5 mb-4 border-b border-gray-200 pb-3">
         <a
-          href={`?cat=&type=${params.type ?? ""}&q=${search}`}
+          href={`?cat=${encodeURIComponent("度なし")}&q=${search}`}
           className={`px-3 py-0.5 rounded-lg text-xs font-medium transition-colors ${
-            !categoryFilter
+            isDoNashi
               ? "bg-blue-600 text-white"
               : "bg-gray-100 text-gray-600 hover:bg-gray-200"
           }`}
         >
-          すべて
+          度なし
         </a>
         {categories.map((cat) => (
           <a
             key={cat.id}
-            href={`?cat=${encodeURIComponent(cat.name)}&type=${params.type ?? ""}&q=${search}`}
+            href={`?cat=${encodeURIComponent(cat.name)}&q=${search}`}
             className={`px-3 py-0.5 rounded-lg text-xs font-medium transition-colors ${
               categoryFilter === cat.name
                 ? "bg-blue-600 text-white"
@@ -115,28 +114,9 @@ export default async function InventoryPage({
         ))}
       </div>
 
-      {/* フィルター */}
+      {/* 検索 */}
       <div className="flex items-center gap-3 mb-4">
         <SearchInput />
-        <div className="flex rounded-lg border border-gray-300 overflow-hidden text-sm">
-          {[
-            { value: "", label: "すべて" },
-            { value: "WITH_PRESCRIPTION", label: "度あり" },
-            { value: "WITHOUT_PRESCRIPTION", label: "度なし" },
-          ].map((opt) => (
-            <a
-              key={opt.value}
-              href={`?cat=${categoryFilter}&type=${opt.value}&q=${search}`}
-              className={`px-3 py-0.5 transition-colors ${
-                (params.type ?? "") === opt.value
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              {opt.label}
-            </a>
-          ))}
-        </div>
       </div>
 
       {/* ページネーション */}
@@ -144,7 +124,7 @@ export default async function InventoryPage({
         <div className="flex justify-end gap-2 mb-4">
           {page > 1 && (
             <a
-              href={`?cat=${categoryFilter}&type=${params.type ?? ""}&q=${search}&page=${page - 1}`}
+              href={`?cat=${categoryFilter}&q=${search}&page=${page - 1}`}
               className="px-3 py-0.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
             >
               前へ
@@ -155,7 +135,7 @@ export default async function InventoryPage({
           </span>
           {page < Math.ceil(total / perPage) && (
             <a
-              href={`?cat=${categoryFilter}&type=${params.type ?? ""}&q=${search}&page=${page + 1}`}
+              href={`?cat=${categoryFilter}&q=${search}&page=${page + 1}`}
               className="px-3 py-0.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
             >
               次へ
@@ -172,8 +152,8 @@ export default async function InventoryPage({
               <th className="text-left px-3 py-2 font-medium whitespace-nowrap">FNSKU<br /><span className="font-normal text-gray-400">ロジレス識別番号</span></th>
               <th className="text-left px-3 py-2 font-medium whitespace-nowrap">商品名</th>
               <th className="text-center px-3 py-2 font-medium whitespace-nowrap">種別</th>
-              <th className="text-right px-3 py-2 font-medium whitespace-nowrap">FBA在庫</th>
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">FBA上限</th>
+              <th className="text-right px-3 py-2 font-medium whitespace-nowrap">FBA在庫</th>
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">ロジレス在庫</th>
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">3ヶ月売上</th>
               <th className="text-left px-3 py-2 font-medium whitespace-nowrap">ロケーション</th>
