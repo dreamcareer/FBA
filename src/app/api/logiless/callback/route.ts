@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   }
 
   // アクセストークン取得
-  const tokenRes = await fetch("https://app2.logiless.com/oauth/v2/token", {
+  const tokenRes = await fetch("https://app2.logiless.com/oauth2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({

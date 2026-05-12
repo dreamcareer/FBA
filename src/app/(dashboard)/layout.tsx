@@ -20,11 +20,16 @@ export default async function DashboardLayout({
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // 最終同期日時を取得
-  const lastSync = await db.syncLog.findFirst({
-    where: { type: "LOGILESS_INVENTORY", status: "SUCCESS" },
-    orderBy: { finishedAt: "desc" },
-  });
+  // 最終同期日時を取得（DB接続エラー時はスキップ）
+  let lastSync: { finishedAt: Date | null } | null = null;
+  try {
+    lastSync = await db.syncLog.findFirst({
+      where: { type: "LOGILESS_INVENTORY", status: "SUCCESS" },
+      orderBy: { finishedAt: "desc" },
+    });
+  } catch {
+    // DB接続失敗時はサイドバーの同期日時を非表示にする
+  }
 
   return (
     <div className="flex h-screen bg-gray-50">

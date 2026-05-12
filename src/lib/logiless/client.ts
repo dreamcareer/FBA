@@ -16,6 +16,45 @@ function getBaseUrl(): string {
   return `${BASE_URL}/merchant/${MERCHANT_ID}`;
 }
 
+const REAUTH_MESSAGE =
+  "Logiless 再認可が必要です。/api/logiless/authorize にアクセスしてください。";
+
+/**
+ * リフレッシュトークンで新しいアクセストークンを取得し、DBを更新する
+ */
+async function refreshAccessToken(refreshToken: string): Promise<string> {
+  const res = await fetch("https://app2.logiless.com/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: process.env.LOGILESS_CLIENT_ID!,
+      client_secret: process.env.LOGILESS_CLIENT_SECRET!,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`${REAUTH_MESSAGE} (refresh failed: ${res.status} — ${text})`);
+  }
+
+  const data = await res.json();
+
+  await db.oAuthToken.update({
+    where: { provider: "logiless" },
+    data: {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token ?? refreshToken,
+      expiresAt: data.expires_in
+        ? new Date(Date.now() + data.expires_in * 1000)
+        : null,
+    },
+  });
+
+  return data.access_token;
+}
+
 /**
  * DBからアクセストークンを取得し、期限切れならリフレッシュする
  */
@@ -25,47 +64,15 @@ async function getAccessToken(): Promise<string> {
   });
 
   if (!token) {
-    throw new Error(
-      "Logiless未認可です。/api/logiless/authorize にアクセスしてOAuth認証してください。"
-    );
+    throw new Error(REAUTH_MESSAGE);
   }
 
   // 期限切れチェック（5分前にリフレッシュ）
   if (token.expiresAt && token.expiresAt < new Date(Date.now() + 5 * 60 * 1000)) {
     if (!token.refreshToken) {
-      throw new Error("リフレッシュトークンがありません。再認証してください。");
+      throw new Error(REAUTH_MESSAGE);
     }
-
-    const res = await fetch("https://app2.logiless.com/oauth/v2/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: token.refreshToken,
-        client_id: process.env.LOGILESS_CLIENT_ID!,
-        client_secret: process.env.LOGILESS_CLIENT_SECRET!,
-      }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`トークンリフレッシュ失敗: ${res.status} — ${text}`);
-    }
-
-    const data = await res.json();
-
-    await db.oAuthToken.update({
-      where: { provider: "logiless" },
-      data: {
-        accessToken: data.access_token,
-        refreshToken: data.refresh_token ?? token.refreshToken,
-        expiresAt: data.expires_in
-          ? new Date(Date.now() + data.expires_in * 1000)
-          : null,
-      },
-    });
-
-    return data.access_token;
+    return refreshAccessToken(token.refreshToken);
   }
 
   return token.accessToken;
@@ -77,8 +84,9 @@ async function request<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
-  const accessToken = await getAccessToken();
+  let accessToken = await getAccessToken();
   const url = `${getBaseUrl()}${path}`;
+  let refreshedOnce = false;
 
   // リトライ付き（502/429対策）
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -95,6 +103,20 @@ async function request<T>(
       const wait = (attempt + 1) * 3000; // 3s, 6s, 9s
       console.warn(`[Logiless] ${res.status} — retrying in ${wait}ms...`);
       await sleep(wait);
+      continue;
+    }
+
+    // 401: アクセストークン失効 → refresh があれば1回だけ強制リフレッシュしてリトライ
+    if (res.status === 401 && !refreshedOnce) {
+      const token = await db.oAuthToken.findUnique({
+        where: { provider: "logiless" },
+      });
+      if (!token?.refreshToken) {
+        throw new Error(REAUTH_MESSAGE);
+      }
+      console.warn("[Logiless] 401 — forcing token refresh and retrying once...");
+      accessToken = await refreshAccessToken(token.refreshToken);
+      refreshedOnce = true;
       continue;
     }
 

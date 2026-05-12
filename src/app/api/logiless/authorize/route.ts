@@ -11,6 +11,6 @@ export async function GET(req: NextRequest) {
     redirect_uri: process.env.LOGILESS_REDIRECT_URI!,
   });
 
-  const url = `https://app2.logiless.com/oauth/v2/authorize?${params.toString()}`;
+  const url = `https://app2.logiless.com/oauth/v2/auth?${params.toString()}`;
   return NextResponse.redirect(url, { status: 302 });
 }
