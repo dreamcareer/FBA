@@ -13,15 +13,14 @@ export default function SyncButton() {
   const [reauthRequired, setReauthRequired] = useState(false);
   const router = useRouter();
 
-  async function handleSync(fullSync: boolean) {
+  async function handleSync() {
     setLoading(true);
     setResult(null);
     setReauthRequired(false);
     try {
-      // Step 1: 商品マスタ同期（diff=新規のみ / full=全件）
-      const mode = fullSync ? "full" : "diff";
-      setResult(fullSync ? "商品マスタを全件同期中..." : "新規商品を確認中...");
-      const articlesRes = await fetch(`/api/sync/articles?mode=${mode}`, { method: "POST" });
+      // Step 1: 商品マスタ同期（新規のみ）
+      setResult("新規商品を確認中...");
+      const articlesRes = await fetch(`/api/sync/articles?mode=diff`, { method: "POST" });
       const articlesData = await articlesRes.json();
       if (!articlesRes.ok) {
         if (needsReauth(articlesData.error)) {
@@ -72,20 +71,12 @@ export default function SyncButton() {
           </span>
         )}
         <button
-          onClick={() => handleSync(false)}
+          onClick={handleSync}
           disabled={loading}
           className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
         >
           <span className={loading ? "animate-spin" : ""}>🔄</span>
           {loading ? "同期中..." : "在庫同期"}
-        </button>
-        <button
-          onClick={() => handleSync(true)}
-          disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-600 disabled:opacity-50 transition-colors"
-          title="全商品マスタを再取得（初回や商品追加時に使用、数分かかります）"
-        >
-          フル同期
         </button>
       </div>
       {reauthRequired && (

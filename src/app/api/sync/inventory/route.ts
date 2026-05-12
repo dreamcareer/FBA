@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
 
         return {
           productId,
-          location: inv.location?.code ?? null,
+          location: inv.location?.name ?? inv.location?.code ?? null,
           lotNumber: inv.lot_number ?? null,
           quantity: inv.available + inv.blocked,
           expiryDate: deadline ? new Date(deadline) : null,
