@@ -10,91 +10,79 @@ datasource db {
 
 // ── 商品種別 ──────────────────────────────────────────────
 model ProductCategory {
-  id        String    @id @default(cuid()) @map("product_category_id")
-  name      String    @map("category_name")
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
+  id        String   @id @default(cuid()) @map("product_category_id")
+  name      String   @map("category_name")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  products  Product[]
+  products Product[]
 
   @@map("product_categories")
 }
 
 // ── 商品マスタ ─────────────────────────────────────────────
 model Product {
-  id                   String    @id @default(cuid()) @map("product_master_id")
-  categoryId           String    @map("category_id")
-  sku                  String    @unique           // identification_code (Amazon SKU)
-  name                 String    @map("product_name")
-  asin                 String?
-  fnsku                String?                     // model_number (FNSKU)
-  janCode              String?   @map("jan_code")  // code (JANコード)
-  logilessProductCode  String?   @map("logiless_product_code") // code (JANコード)
-  logilessArticleId    Int?      @unique @map("logiless_article_id")
-  productType          ProductType @map("product_type")
-
-  // Logilessフリー項目
-  attr1                String?   // フリー項目1
-  attr2                String?   // フリー項目2
-  attr3                String?   // フリー項目3
-  attr4                String?   // フリー項目4
-  attr5                String?   // フリー項目5
-  attr6                String?   // フリー項目6
-  attr7                String?   // フリー項目7
-  attr8                String?   // フリー項目8
-
-  // Logiless追加情報
-  cost                 Float?                      // 原価
-  reorderPoint         Int?      @map("reorder_point") // 発注点
+  id                  String      @id @default(cuid()) @map("product_master_id")
+  categoryId          String      @map("category_id")
+  sku                 String      @unique // Amazon SKU (ロジレスのattr4、なければidentification_code)
+  name                String      @map("product_name") // ロジレス由来
+  asin                String? // SP-APIから同期
+  logilessProductCode String?     @map("logiless_product_code") // ロジレスのcode (= JAN) ← ロジレス在庫突合キー
+  logilessArticleId   Int?        @unique @map("logiless_article_id")
+  productType         ProductType @map("product_type")
 
   // FBA在庫情報（SP-APIから同期）
-  fbaStockQuantity     Int       @default(0) @map("fba_stock_quantity")
-  fbaStockUpperLimit   Int?      @map("fba_stock_upper_limit")
-  fbaStockSyncedAt     DateTime? @map("fba_stock_synced_at")
+  fbaStockQuantity   Int       @default(0) @map("fba_stock_quantity")
+  fbaStockUpperLimit Int?      @map("fba_stock_upper_limit")
+  fbaStockSyncedAt   DateTime? @map("fba_stock_synced_at")
+
+  // FBA上限・入荷予定（週次CSVインポートで更新）
+  fbaOpenPoQuantity Int?      @map("fba_open_po_quantity")
+  fbaLimitUpdatedAt DateTime? @map("fba_limit_updated_at")
 
   // ロジレスに残す在庫数
-  logilessStockReserve Int       @default(25) @map("logiless_stock_reserve")
+  logilessStockReserve Int @default(25) @map("logiless_stock_reserve")
 
   // 売上データ（SP-APIから同期）
-  business1y           Float?    @map("business_1y")
-  business3m           Float?    @map("business_3m")
-  salesDataSyncedAt    DateTime? @map("sales_data_synced_at")
+  business1y        Float?    @map("business_1y")
+  business3m        Float?    @map("business_3m")
+  salesDataSyncedAt DateTime? @map("sales_data_synced_at")
 
   // 次回入荷情報（手動入力）
-  nextArrivalDate      DateTime? @map("next_arrival_date")
-  nextArrivalQuantity  Int?      @map("next_arrival_quantity")
+  nextArrivalDate     DateTime? @map("next_arrival_date")
+  nextArrivalQuantity Int?      @map("next_arrival_quantity")
 
   // 管理フラグ
-  isDiscontinued       Boolean   @default(false) @map("is_discontinued")
-  isActive             Boolean   @default(true)  @map("is_active")
+  isDiscontinued Boolean @default(false) @map("is_discontinued")
+  isActive       Boolean @default(true) @map("is_active")
 
-  createdAt            DateTime  @default(now()) @map("created_at")
-  updatedAt            DateTime  @updatedAt      @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  category             ProductCategory    @relation(fields: [categoryId], references: [id])
-  logilessInventories  LogilessInventory[]
-  deliveryPlanItems    DeliveryPlanItem[]
+  category            ProductCategory     @relation(fields: [categoryId], references: [id])
+  logilessInventories LogilessInventory[]
+  deliveryPlanItems   DeliveryPlanItem[]
 
   @@map("products")
 }
 
 enum ProductType {
-  WITH_PRESCRIPTION    // 度あり
+  WITH_PRESCRIPTION // 度あり
   WITHOUT_PRESCRIPTION // 度なし
 }
 
 // ── ロジレス在庫（ロット・期限別） ───────────────────────────
 model LogilessInventory {
-  id          String    @id @default(cuid()) @map("logiless_inventory_id")
-  productId   String    @map("product_id")
-  location    String?
-  lotNumber   String?   @map("lot_number")
-  quantity    Int       @default(0)
-  expiryDate  DateTime? @map("expiry_date")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt      @map("updated_at")
+  id         String    @id @default(cuid()) @map("logiless_inventory_id")
+  productId  String    @map("product_id")
+  location   String?
+  lotNumber  String?   @map("lot_number")
+  quantity   Int       @default(0)
+  expiryDate DateTime? @map("expiry_date")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
 
-  product     Product   @relation(fields: [productId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
 
   @@map("logiless_inventories")
 }
@@ -104,48 +92,48 @@ model DeliveryPlan {
   id                String             @id @default(cuid()) @map("delivery_plan_id")
   name              String             @map("plan_name")
   logilessOrderCode String?            @unique @map("logiless_order_code") // STAyyyymmdd-n
-  spApiShipmentId   String?            @map("sp_api_shipment_id")           // Phase 2
+  spApiShipmentId   String?            @map("sp_api_shipment_id") // Phase 2
   shipmentDate      DateTime?          @map("shipment_date")
   status            DeliveryPlanStatus @default(DRAFT)
   createdAt         DateTime           @default(now()) @map("created_at")
-  updatedAt         DateTime           @updatedAt      @map("updated_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
 
-  items             DeliveryPlanItem[]
+  items DeliveryPlanItem[]
 
   @@map("delivery_plans")
 }
 
 enum DeliveryPlanStatus {
-  DRAFT       // 作成中
-  SUBMITTED   // ロジレス登録済み
-  SHIPPED     // 出荷済み
-  COMPLETED   // 完了
-  CANCELLED   // キャンセル
+  DRAFT // 作成中
+  SUBMITTED // ロジレス登録済み
+  SHIPPED // 出荷済み
+  COMPLETED // 完了
+  CANCELLED // キャンセル
 }
 
 // ── 納品プラン詳細 ────────────────────────────────────────
 model DeliveryPlanItem {
-  id               String    @id @default(cuid()) @map("delivery_plan_item_id")
-  deliveryPlanId   String    @map("delivery_plan_id")
-  productId        String    @map("product_id")
-  plannedQuantity  Int       @map("planned_quantity")
-  lotNumber        String?   @map("lot_number")
-  expiryDate       DateTime? @map("expiry_date")
-  createdAt        DateTime  @default(now()) @map("created_at")
+  id              String    @id @default(cuid()) @map("delivery_plan_item_id")
+  deliveryPlanId  String    @map("delivery_plan_id")
+  productId       String    @map("product_id")
+  plannedQuantity Int       @map("planned_quantity")
+  lotNumber       String?   @map("lot_number")
+  expiryDate      DateTime? @map("expiry_date")
+  createdAt       DateTime  @default(now()) @map("created_at")
 
-  deliveryPlan     DeliveryPlan @relation(fields: [deliveryPlanId], references: [id], onDelete: Cascade)
-  product          Product      @relation(fields: [productId], references: [id])
+  deliveryPlan DeliveryPlan @relation(fields: [deliveryPlanId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id])
 
   @@map("delivery_plan_items")
 }
 
 // ── 同期ログ ──────────────────────────────────────────────
 model SyncLog {
-  id        String      @id @default(cuid())
-  type      SyncType
-  status    SyncStatus
-  message   String?
-  startedAt DateTime    @default(now()) @map("started_at")
+  id         String     @id @default(cuid())
+  type       SyncType
+  status     SyncStatus
+  message    String?
+  startedAt  DateTime   @default(now()) @map("started_at")
   finishedAt DateTime?  @map("finished_at")
 
   @@map("sync_logs")
@@ -153,8 +141,8 @@ model SyncLog {
 
 enum SyncType {
   LOGILESS_INVENTORY
-  FBA_INVENTORY       // Phase 2
-  SALES_DATA          // Phase 2
+  FBA_INVENTORY // Phase 2
+  SALES_DATA // Phase 2
 }
 
 enum SyncStatus {
@@ -165,23 +153,23 @@ enum SyncStatus {
 
 // ── 在庫洗い出し結果 ──────────────────────────────────────
 model InventoryCheckResult {
-  id           String   @id @default(cuid())
-  executedAt   DateTime @default(now()) @map("executed_at")
-  totalCount   Int      @map("total_count")
-  data         String   @db.Text // JSON文字列で結果を保存
+  id         String   @id @default(cuid())
+  executedAt DateTime @default(now()) @map("executed_at")
+  totalCount Int      @map("total_count")
+  data       String   @db.Text // JSON文字列で結果を保存
 
   @@map("inventory_check_results")
 }
 
 // ── OAuthトークン ─────────────────────────────────────────
 model OAuthToken {
-  id           String   @id @default(cuid())
-  provider     String   @unique // "logiless"
-  accessToken  String   @map("access_token")
-  refreshToken String?  @map("refresh_token")
+  id           String    @id @default(cuid())
+  provider     String    @unique // "logiless"
+  accessToken  String    @map("access_token")
+  refreshToken String?   @map("refresh_token")
   expiresAt    DateTime? @map("expires_at")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
 
   @@map("oauth_tokens")
 }

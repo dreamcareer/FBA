@@ -51,9 +51,8 @@ export default async function InventoryPage({
           OR: [
             { sku: { contains: search, mode: "insensitive" as const } },
             { name: { contains: search, mode: "insensitive" as const } },
-            { fnsku: { contains: search, mode: "insensitive" as const } },
             { asin: { contains: search, mode: "insensitive" as const } },
-            { janCode: { contains: search, mode: "insensitive" as const } },
+            { logilessProductCode: { contains: search, mode: "insensitive" as const } },
           ],
         }
       : {}),
@@ -154,6 +153,7 @@ export default async function InventoryPage({
               <th className="text-center px-3 py-2 font-medium whitespace-nowrap">種別</th>
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">FBA上限</th>
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">FBA在庫</th>
+              <th className="text-right px-3 py-2 font-medium whitespace-nowrap">入荷予定</th>
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">ロジレス在庫</th>
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">3ヶ月売上</th>
               <th className="text-left px-3 py-2 font-medium whitespace-nowrap">ロケーション</th>
@@ -190,6 +190,7 @@ export default async function InventoryPage({
                       productType: item.product.productType,
                       fbaStockQuantity: item.product.fbaStockQuantity,
                       fbaStockUpperLimit: item.product.fbaStockUpperLimit,
+                      fbaOpenPoQuantity: item.product.fbaOpenPoQuantity,
                       business3m: item.product.business3m,
                     },
                     lots: item.lots,

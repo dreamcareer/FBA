@@ -7,7 +7,7 @@ import { SyncStatus, SyncType } from "@prisma/client";
 /**
  * POST /api/sync/fba-inventory
  * SP-API から FBA 在庫を取得し、以下を1パスで更新する:
- *  - products.sku / products.asin（FNSKU一致で SP-API 値に更新）
+ *  - products.asin（SKU一致で SP-API 値に更新）
  *  - products.fba_stock_quantity（fulfillableQuantity）
  *
  * Cronジョブ（Bearer CRON_SECRET）または画面から（Supabaseセッション）呼び出す
@@ -47,79 +47,57 @@ export async function POST(req: NextRequest) {
     const fbaItems = await fetchFbaInventory();
 
     const products = await db.product.findMany({
-      select: { id: true, sku: true, fnsku: true, asin: true },
+      select: { id: true, sku: true, asin: true },
     });
-    const skuToId = new Map(products.map((p) => [p.sku, p.id]));
-    const fnskuToProduct = new Map(
-      products.filter((p) => p.fnsku).map((p) => [p.fnsku as string, p])
-    );
+    const skuToProduct = new Map(products.map((p) => [p.sku, p]));
 
-    // FNSKU → SP-APIの sellerSku/asin（SKU/ASIN更新の参照用、最初の1件を採用）
-    const fnskuToSpApi = new Map<string, { sellerSku: string; asin: string | null }>();
+    // SKU → SP-APIの asin（ASIN更新用、最初の1件を採用）
+    const skuToSpApiAsin = new Map<string, string | null>();
     for (const item of fbaItems) {
-      if (item.fnsku && !fnskuToSpApi.has(item.fnsku)) {
-        fnskuToSpApi.set(item.fnsku, { sellerSku: item.sellerSku, asin: item.asin });
+      if (!skuToSpApiAsin.has(item.sellerSku)) {
+        skuToSpApiAsin.set(item.sellerSku, item.asin);
       }
     }
 
     // productId 単位で在庫を集約（同一商品が複数 condition で返ることがある）
     const stockByProductId = new Map<string, number>();
-    let matchedBySku = 0;
-    let matchedByFnsku = 0;
+    let matched = 0;
     let unmatched = 0;
-    const unmatchedSamples: { sellerSku: string; fnsku: string | null }[] = [];
+    const unmatchedSamples: { sellerSku: string }[] = [];
 
     for (const item of fbaItems) {
-      let productId = skuToId.get(item.sellerSku);
-      if (productId) {
-        matchedBySku++;
-      } else if (item.fnsku) {
-        const p = fnskuToProduct.get(item.fnsku);
-        productId = p?.id;
-        if (productId) matchedByFnsku++;
-      }
-
-      if (!productId) {
+      const product = skuToProduct.get(item.sellerSku);
+      if (!product) {
         unmatched++;
         if (unmatchedSamples.length < 20) {
-          unmatchedSamples.push({ sellerSku: item.sellerSku, fnsku: item.fnsku });
+          unmatchedSamples.push({ sellerSku: item.sellerSku });
         }
         continue;
       }
+      matched++;
 
       stockByProductId.set(
-        productId,
-        (stockByProductId.get(productId) ?? 0) + item.fulfillableQuantity
+        product.id,
+        (stockByProductId.get(product.id) ?? 0) + item.fulfillableQuantity
       );
     }
 
-    // ── SKU/ASIN 更新の準備（FNSKU一致で値が変わる商品のみ） ──
-    const skuOwners = new Map(products.map((p) => [p.sku, p.id]));
-    const skuAsinWrites: ReturnType<typeof db.product.update>[] = [];
-    let skuUpdated = 0;
-    let skuConflicts = 0;
+    // ── ASIN 更新の準備（SKU一致でSP-APIのASINと差分があるもののみ） ──
+    const asinWrites: ReturnType<typeof db.product.update>[] = [];
+    let asinUpdated = 0;
 
     for (const product of products) {
-      if (!product.fnsku) continue;
-      const spApi = fnskuToSpApi.get(product.fnsku);
-      if (!spApi) continue;
-      if (product.sku === spApi.sellerSku && product.asin === spApi.asin) continue;
+      const spApiAsin = skuToSpApiAsin.get(product.sku);
+      if (spApiAsin === undefined) continue;
+      if (product.asin === spApiAsin) continue;
 
-      const owner = skuOwners.get(spApi.sellerSku);
-      if (owner && owner !== product.id) {
-        skuConflicts++;
-        continue;
-      }
-
-      skuAsinWrites.push(
+      asinWrites.push(
         db.product.update({
           where: { id: product.id },
-          data: { sku: spApi.sellerSku, asin: spApi.asin },
+          data: { asin: spApiAsin },
         })
       );
-      skuOwners.delete(product.sku);
-      skuOwners.set(spApi.sellerSku, product.id);
-      skuUpdated++;
+      asinUpdated++;
     }
 
     // ── 数量更新の準備 ──
@@ -131,16 +109,16 @@ export async function POST(req: NextRequest) {
       })
     );
 
-    // ── まとめてトランザクション実行（1往復で全件書き込み） ──
-    if (skuAsinWrites.length > 0) {
-      await db.$transaction(skuAsinWrites);
+    // ── まとめてトランザクション実行 ──
+    if (asinWrites.length > 0) {
+      await db.$transaction(asinWrites);
     }
     if (stockWrites.length > 0) {
       await db.$transaction(stockWrites);
     }
 
     const updated = stockWrites.length;
-    const message = `数量${updated}件 / SKU${skuUpdated}件更新（SKU一致: ${matchedBySku}、FNSKU一致: ${matchedByFnsku}、マッチなし: ${unmatched}、SKU衝突: ${skuConflicts} / SP-API取得: ${fbaItems.length}件）`;
+    const message = `数量${updated}件 / ASIN${asinUpdated}件更新（SKU一致: ${matched}、マッチなし: ${unmatched} / SP-API取得: ${fbaItems.length}件）`;
 
     await db.syncLog.update({
       where: { id: syncLog.id },
@@ -155,10 +133,8 @@ export async function POST(req: NextRequest) {
       success: true,
       fetched: fbaItems.length,
       updated,
-      skuUpdated,
-      skuConflicts,
-      matchedBySku,
-      matchedByFnsku,
+      asinUpdated,
+      matched,
       unmatched,
       unmatchedSamples,
     });

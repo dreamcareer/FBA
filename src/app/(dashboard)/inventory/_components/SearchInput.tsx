@@ -39,7 +39,7 @@ export default function SearchInput() {
         type="text"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="FNSKU、ロジレス識別番号、商品名で検索"
+        placeholder="SKU、ASIN、JAN、商品名で検索"
         className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-80 focus:outline-none focus:ring-2 focus:ring-blue-500"
       />
       {isPending && (

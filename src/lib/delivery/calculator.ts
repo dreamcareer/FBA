@@ -88,15 +88,16 @@ function isExpiryWarning(expiryDate: Date | null): boolean {
 function calcWithPrescription(
   product: ProductForCalculation
 ): { quantity: number; skipReason: SkipReason | null } {
-  const { fbaStockQuantity, fbaStockUpperLimit } = product;
+  const { fbaStockQuantity, fbaStockUpperLimit, fbaOpenPoQuantity } = product;
 
   // FBA上限が未設定の場合はスキップ
   if (fbaStockUpperLimit === null) {
     return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
   }
 
-  // FBA上限 - FBA在庫 = 不足数
-  const needed = fbaStockUpperLimit - fbaStockQuantity;
+  // FBA上限 - FBA在庫 - 入荷予定 = 不足数（既に納品予定の分を二重カウントしない）
+  const openPo = fbaOpenPoQuantity ?? 0;
+  const needed = fbaStockUpperLimit - fbaStockQuantity - openPo;
   if (needed <= 0) {
     return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
   }
@@ -111,15 +112,16 @@ function calcWithPrescription(
 function calcWithoutPrescription(
   product: ProductForCalculation
 ): { quantity: number; skipReason: SkipReason | null } {
-  const { fbaStockQuantity, fbaStockUpperLimit } = product;
+  const { fbaStockQuantity, fbaStockUpperLimit, fbaOpenPoQuantity } = product;
 
   // FBA上限が未設定の場合はスキップ
   if (fbaStockUpperLimit === null) {
     return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
   }
 
-  // FBA上限 - FBA在庫 = 不足数
-  const needed = fbaStockUpperLimit - fbaStockQuantity;
+  // FBA上限 - FBA在庫 - 入荷予定 = 不足数（既に納品予定の分を二重カウントしない）
+  const openPo = fbaOpenPoQuantity ?? 0;
+  const needed = fbaStockUpperLimit - fbaStockQuantity - openPo;
   if (needed <= 0) {
     return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
   }

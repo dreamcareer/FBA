@@ -53,7 +53,6 @@ export async function POST(req: NextRequest) {
       id: product.id,
       name: product.name,
       sku: product.sku,
-      fnsku: product.fnsku,
       logilessStock: logilessTotal,
       threshold,
       isPrescription,
