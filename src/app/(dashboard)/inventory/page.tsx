@@ -149,7 +149,7 @@ export default async function InventoryPage({
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-gray-700 text-white">
-              <th className="text-left px-3 py-2 font-medium whitespace-nowrap">FNSKU<br /><span className="font-normal text-gray-400">ロジレス識別番号</span></th>
+              <th className="text-left px-3 py-2 font-medium whitespace-nowrap">SKU<br /><span className="font-normal text-gray-400">ASIN</span></th>
               <th className="text-left px-3 py-2 font-medium whitespace-nowrap">商品名</th>
               <th className="text-center px-3 py-2 font-medium whitespace-nowrap">種別</th>
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">FBA上限</th>
@@ -184,8 +184,8 @@ export default async function InventoryPage({
                   items={items.map((item) => ({
                     product: {
                       id: item.product.id,
-                      fnsku: item.product.fnsku,
                       sku: item.product.sku,
+                      asin: item.product.asin,
                       name: item.product.name,
                       productType: item.product.productType,
                       fbaStockQuantity: item.product.fbaStockQuantity,
