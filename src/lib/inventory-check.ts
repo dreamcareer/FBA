@@ -6,7 +6,6 @@ export type ShortageItem = {
   id: string;
   name: string;
   sku: string;
-  fnsku: string | null;
   logilessStock: number;
   threshold: number;
   isPrescription: boolean;

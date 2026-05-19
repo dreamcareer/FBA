@@ -144,7 +144,7 @@ export default function InventoryCheckPage() {
                   <thead>
                     <tr className="bg-gray-100 border-b border-gray-200">
                       <th className="text-left px-3 py-1.5 font-medium text-gray-600 max-w-[300px]">商品名</th>
-                      <th className="text-left px-3 py-1.5 font-medium text-gray-600 w-36">FNSKU<br /><span className="font-normal text-gray-400">ロジレス識別番号</span></th>
+                      <th className="text-left px-3 py-1.5 font-medium text-gray-600 w-36">SKU</th>
                       <th className="text-center px-3 py-1.5 font-medium text-gray-600 w-16">種別</th>
                       <th className="text-right px-3 py-1.5 font-medium text-gray-600 w-24">ロジレス在庫</th>
                       <th className="text-right px-3 py-1.5 font-medium text-gray-600 w-14">閾値</th>
