@@ -14,8 +14,8 @@ type Lot = {
 
 type Product = {
   id: string;
-  fnsku: string | null;
   sku: string;
+  asin: string | null;
   name: string;
   productType: string;
   fbaStockQuantity: number;

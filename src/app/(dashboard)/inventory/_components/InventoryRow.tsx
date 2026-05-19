@@ -14,8 +14,8 @@ type Lot = {
 type Props = {
   product: {
     id: string;
-    fnsku: string | null;
     sku: string;
+    asin: string | null;
     name: string;
     productType: string;
     fbaStockQuantity: number;
@@ -51,9 +51,9 @@ export default function InventoryRow({ product, lots, stripe, minExpiry }: Props
         onClick={() => hasLots && setOpen(!open)}
       >
         <td className="px-3 py-0.5 font-mono text-gray-500 whitespace-nowrap">
-          {product.fnsku ?? "—"}
+          {product.sku}
           <br />
-          <span className="text-gray-400">{product.sku}</span>
+          <span className="text-gray-400">{product.asin ?? "—"}</span>
         </td>
         <td className="px-3 py-0.5 text-gray-800 whitespace-nowrap">
           {product.name}

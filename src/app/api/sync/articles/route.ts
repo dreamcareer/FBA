@@ -60,16 +60,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 既存商品のSKU一覧を取得
+    // 既存商品（logilessArticleId をキーに保持）
     const existingProducts = await db.product.findMany({
-      select: { sku: true },
+      select: { id: true, sku: true, logilessArticleId: true },
     });
-    const existingSkus = new Set(existingProducts.map((p) => p.sku));
+    const articleIdToProduct = new Map(
+      existingProducts
+        .filter((p) => p.logilessArticleId !== null)
+        .map((p) => [p.logilessArticleId as number, p])
+    );
 
-    // diffモード: 新規商品のみ詳細取得
+    // diffモード: 新規商品（logilessArticleId 未登録）のみ詳細取得
     const toFetch = mode === "full"
       ? summaries
-      : summaries.filter((s) => s.identification_code && !existingSkus.has(s.identification_code));
+      : summaries.filter((s) => s.identification_code && !articleIdToProduct.has(s.id));
 
     console.log(`[sync/articles] Fetching details for ${toFetch.length} articles...`);
 
@@ -117,12 +121,21 @@ export async function POST(req: NextRequest) {
         reorderPoint: detail.reorder_point ?? null,
       };
 
-      const existing = await db.product.findUnique({ where: { sku: identCode } });
+      // 既存商品は logilessArticleId で特定する（sku は SP-API値に書き換わっている可能性があるため）
+      const existing = await db.product.findUnique({
+        where: { logilessArticleId: detail.id },
+      });
 
       if (existing) {
-        await db.product.update({ where: { sku: identCode }, data });
+        // 既存商品は sku を維持（SP-API同期で更新される）
+        await db.product.update({
+          where: { id: existing.id },
+          data,
+        });
         updated++;
       } else {
+        // 新規商品は暫定的に identification_code を sku に入れる
+        // （その後 /api/sync/sp-api-skus 実行で SP-API SKU に置換される）
         await db.product.create({
           data: { sku: identCode, ...data },
         });

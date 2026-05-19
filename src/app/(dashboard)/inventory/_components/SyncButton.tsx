@@ -32,8 +32,17 @@ export default function SyncButton() {
         return;
       }
 
-      // Step 2: 在庫同期
-      setResult("在庫データを同期中...");
+      // Step 2: FBA在庫同期（SP-APIから取得 → SKU/ASIN 更新 + 在庫数更新 を1パスで実行）
+      setResult("FBA在庫・SKUを同期中...");
+      const fbaRes = await fetch("/api/sync/fba-inventory", { method: "POST" });
+      const fbaData = await fbaRes.json();
+      if (!fbaRes.ok) {
+        setResult(`✗ FBA同期エラー: ${fbaData.error}`);
+        return;
+      }
+
+      // Step 3: ロジレス在庫同期
+      setResult("ロジレス在庫を同期中...");
       const invRes = await fetch("/api/sync/inventory", { method: "POST" });
       const invData = await invRes.json();
       if (!invRes.ok) {
@@ -47,9 +56,11 @@ export default function SyncButton() {
       }
 
       const articleMsg = articlesData.created > 0
-        ? `新規${articlesData.created}件登録、`
+        ? `新規${articlesData.created}件、`
         : "";
-      setResult(`✓ ${articleMsg}在庫 ${invData.synced}件同期`);
+      setResult(
+        `✓ ${articleMsg}FBA ${fbaData.updated}件 / SKU ${fbaData.skuUpdated}件 / ロジレス ${invData.synced}件`
+      );
       router.refresh();
     } catch {
       setResult("✗ 通信エラーが発生しました");
