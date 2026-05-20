@@ -35,8 +35,8 @@ export function getQuantityFromSku(sku: string): number | null {
 }
 
 export function getThreshold(quantity: number | null, isPrescription: boolean): number | null {
-  if (quantity === 10) return isPrescription ? 30 : 300;
-  if (quantity === 30) return isPrescription ? 20 : 150;
+  if (quantity === 10) return isPrescription ? 50 : 300;
+  if (quantity === 30) return isPrescription ? 50 : 150;
   return null;
 }
 

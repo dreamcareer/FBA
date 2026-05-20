@@ -77,8 +77,8 @@ export default function InventoryCheckPage() {
         <div className="bg-blue-50 border border-blue-200 rounded-lg px-5 py-3">
           <p className="text-xs text-blue-600">閾値</p>
           <div className="text-[11px] text-blue-700 mt-1 space-y-0.5">
-            <p>10枚 度なし: 300 / 度あり: 30</p>
-            <p>30枚 度なし: 150 / 度あり: 20</p>
+            <p>10枚 度なし: 300 / 度あり: 50</p>
+            <p>30枚 度なし: 150 / 度あり: 50</p>
           </div>
         </div>
       </div>
