@@ -20,6 +20,7 @@ type Props = {
     productType: string;
     fbaStockQuantity: number;
     fbaStockUpperLimit: number | null;
+    fbaOpenPoQuantity: number | null;
     business3m: number | null;
   };
   lots: Lot[];
@@ -40,6 +41,13 @@ export default function InventoryRow({ product, lots, stripe, minExpiry }: Props
   const nearestExpiry = sortedLots[0]?.expiryDate ? new Date(sortedLots[0].expiryDate) : null;
   const expiryWarning = nearestExpiry && nearestExpiry < new Date(minExpiry);
   const isLowFba = product.fbaStockQuantity < (product.business3m ?? 0) * 0.5;
+
+  // FBA在庫＋入荷予定が上限に達しているかの判定
+  const openPo = product.fbaOpenPoQuantity ?? 0;
+  const projectedTotal = product.fbaStockQuantity + openPo;
+  const isAtCapacity =
+    product.fbaStockUpperLimit !== null &&
+    projectedTotal >= product.fbaStockUpperLimit;
 
   const formatDate = (d: Date) =>
     d.toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
@@ -63,11 +71,15 @@ export default function InventoryRow({ product, lots, stripe, minExpiry }: Props
             ? <span className="text-purple-600">度あり</span>
             : <span className="text-teal-600">度なし</span>}
         </td>
-        <td className="px-3 py-0.5 text-right tabular-nums text-gray-400">
+        <td className={`px-3 py-0.5 text-right tabular-nums ${isAtCapacity ? "text-red-600 font-semibold" : "text-gray-400"}`}>
           {product.fbaStockUpperLimit?.toLocaleString() ?? "—"}
+          {isAtCapacity && <span className="ml-0.5">⚠</span>}
         </td>
         <td className={`px-3 py-0.5 text-right tabular-nums ${isLowFba ? "text-red-600 font-semibold" : "text-gray-700"}`}>
           {product.fbaStockQuantity.toLocaleString()}
+        </td>
+        <td className="px-3 py-0.5 text-right tabular-nums text-gray-500">
+          {openPo > 0 ? openPo.toLocaleString() : "—"}
         </td>
         <td className={`px-3 py-0.5 text-right tabular-nums font-semibold ${logilessTotal === 0 ? "text-red-500" : "text-gray-800"}`}>
           {logilessTotal.toLocaleString()}
@@ -97,6 +109,7 @@ export default function InventoryRow({ product, lots, stripe, minExpiry }: Props
             <td className="px-3 py-0.5 text-gray-400 pl-6" colSpan={2}>
               ロット: {lot.lotNumber ?? "—"}
             </td>
+            <td className="px-3 py-0.5" />
             <td className="px-3 py-0.5" />
             <td className="px-3 py-0.5" />
             <td className="px-3 py-0.5 text-right tabular-nums text-gray-600">

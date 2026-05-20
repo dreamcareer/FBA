@@ -101,43 +101,33 @@ export async function POST(req: NextRequest) {
       const categoryId = categoryMap.get(categoryName)!;
       const productType = getProductType(detail.name);
 
+      // ロジレスのフリー項目4 = Amazon SKU（運用上の取り決め）
+      // 空の場合は identification_code を暫定値として使う
+      const skuFromLogiless = detail.attr4?.trim() || identCode;
+
       const data = {
         name: detail.name,
-        fnsku: detail.model_number ?? null,
-        janCode: detail.code,
+        sku: skuFromLogiless,
         logilessProductCode: detail.code,
         logilessArticleId: detail.id,
         productType,
         categoryId,
-        attr1: detail.attr1 ?? null,
-        attr2: detail.attr2 ?? null,
-        attr3: detail.attr3 ?? null,
-        attr4: detail.attr4 ?? null,
-        attr5: detail.attr5 ?? null,
-        attr6: detail.attr6 ?? null,
-        attr7: detail.attr7 ?? null,
-        attr8: detail.attr8 ?? null,
-        cost: detail.cost ?? null,
-        reorderPoint: detail.reorder_point ?? null,
       };
 
-      // 既存商品は logilessArticleId で特定する（sku は SP-API値に書き換わっている可能性があるため）
+      // 既存商品は logilessArticleId で特定する
       const existing = await db.product.findUnique({
         where: { logilessArticleId: detail.id },
       });
 
       if (existing) {
-        // 既存商品は sku を維持（SP-API同期で更新される）
         await db.product.update({
           where: { id: existing.id },
           data,
         });
         updated++;
       } else {
-        // 新規商品は暫定的に identification_code を sku に入れる
-        // （その後 /api/sync/sp-api-skus 実行で SP-API SKU に置換される）
         await db.product.create({
-          data: { sku: identCode, ...data },
+          data,
         });
         created++;
       }

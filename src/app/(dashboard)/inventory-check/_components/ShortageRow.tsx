@@ -7,7 +7,6 @@ export type ShortageItem = {
   id: string;
   name: string;
   sku: string;
-  fnsku: string | null;
   logilessStock: number;
   threshold: number;
   isPrescription: boolean;
@@ -52,7 +51,7 @@ export default function ShortageRow({ item, idx }: { item: ShortageItem; idx: nu
     <tr className="hover:bg-gray-50/50 border-b border-gray-100">
       <td className="px-3 py-0.5 text-gray-800 max-w-[300px] truncate" title={item.name}>{item.name}</td>
       <td className="px-3 py-0.5 font-mono text-gray-500 whitespace-nowrap">
-        {item.fnsku ?? "—"}<br /><span className="text-gray-400">{item.sku}</span>
+        {item.sku}
       </td>
       <td className="px-3 py-0.5 text-center">
         {item.isPrescription

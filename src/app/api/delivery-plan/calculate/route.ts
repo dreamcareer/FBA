@@ -65,6 +65,7 @@ export async function POST(req: NextRequest) {
     categoryName: p.category.name,
     fbaStockQuantity: p.fbaStockQuantity,
     fbaStockUpperLimit: p.fbaStockUpperLimit,
+    fbaOpenPoQuantity: p.fbaOpenPoQuantity,
     logilessStockReserve: p.logilessStockReserve,
     business3m: p.business3m,
     isDiscontinued: p.isDiscontinued,

@@ -8,6 +8,7 @@ export interface ProductForCalculation {
   categoryName: string;
   fbaStockQuantity: number;
   fbaStockUpperLimit: number | null;
+  fbaOpenPoQuantity: number | null;
   logilessStockReserve: number;
   business3m: number | null;
   isDiscontinued: boolean;

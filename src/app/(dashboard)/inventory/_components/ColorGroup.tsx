@@ -20,6 +20,7 @@ type Product = {
   productType: string;
   fbaStockQuantity: number;
   fbaStockUpperLimit: number | null;
+  fbaOpenPoQuantity: number | null;
   business3m: number | null;
 };
 
@@ -48,7 +49,7 @@ export default function ColorGroup({ colorName, items, minExpiry }: Props) {
         style={{ backgroundColor: bgColor }}
         onClick={() => setOpen(!open)}
       >
-        <td className="px-3 py-1 font-medium text-gray-700" colSpan={5}>
+        <td className="px-3 py-1 font-medium text-gray-700" colSpan={6}>
           <span className="inline-flex items-center gap-1.5">
             <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-blue-500 text-white text-[9px]">
               {open ? "−" : "+"}

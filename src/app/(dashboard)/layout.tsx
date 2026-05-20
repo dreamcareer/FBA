@@ -5,10 +5,11 @@ import { db } from "@/lib/db";
 import LogoutButton from "./_components/LogoutButton";
 
 const NAV_ITEMS = [
-  { href: "/inventory",        label: "在庫一覧",       icon: "📦" },
-  { href: "/inventory-check",  label: "在庫洗い出し",   icon: "🔍" },
-  { href: "/provisional-plan", label: "仮プラン作成",   icon: "📋" },
-  { href: "/delivery-plan",    label: "納品プラン管理", icon: "🚚" },
+  { href: "/inventory",            label: "在庫一覧",         icon: "📦" },
+  { href: "/inventory-check",      label: "在庫洗い出し",     icon: "🔍" },
+  { href: "/provisional-plan",     label: "仮プラン作成",     icon: "📋" },
+  { href: "/delivery-plan",        label: "納品プラン管理",   icon: "🚚" },
+  { href: "/inventory/fba-limits", label: "FBA上限取り込み", icon: "📤" },
 ];
 
 export default async function DashboardLayout({

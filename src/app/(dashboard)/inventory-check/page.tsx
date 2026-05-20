@@ -77,8 +77,8 @@ export default function InventoryCheckPage() {
         <div className="bg-blue-50 border border-blue-200 rounded-lg px-5 py-3">
           <p className="text-xs text-blue-600">閾値</p>
           <div className="text-[11px] text-blue-700 mt-1 space-y-0.5">
-            <p>10枚 度なし: 300 / 度あり: 30</p>
-            <p>30枚 度なし: 150 / 度あり: 20</p>
+            <p>10枚 度なし: 300 / 度あり: 50</p>
+            <p>30枚 度なし: 150 / 度あり: 50</p>
           </div>
         </div>
       </div>
@@ -144,7 +144,7 @@ export default function InventoryCheckPage() {
                   <thead>
                     <tr className="bg-gray-100 border-b border-gray-200">
                       <th className="text-left px-3 py-1.5 font-medium text-gray-600 max-w-[300px]">商品名</th>
-                      <th className="text-left px-3 py-1.5 font-medium text-gray-600 w-36">FNSKU<br /><span className="font-normal text-gray-400">ロジレス識別番号</span></th>
+                      <th className="text-left px-3 py-1.5 font-medium text-gray-600 w-36">SKU</th>
                       <th className="text-center px-3 py-1.5 font-medium text-gray-600 w-16">種別</th>
                       <th className="text-right px-3 py-1.5 font-medium text-gray-600 w-24">ロジレス在庫</th>
                       <th className="text-right px-3 py-1.5 font-medium text-gray-600 w-14">閾値</th>
