@@ -3,48 +3,35 @@ import { createServerClient } from "@supabase/ssr";
 import { db } from "@/lib/db";
 import { fetchFbaInventory } from "@/lib/sp-api/client";
 import { SyncStatus, SyncType } from "@prisma/client";
+import { ndjsonStream, wantsStream, type EmitFn } from "@/lib/sync/stream";
 
-/**
- * POST /api/sync/fba-inventory
- * SP-API から FBA 在庫を取得し、以下を1パスで更新する:
- *  - products.asin（SKU一致で SP-API 値に更新）
- *  - products.fba_stock_quantity（fulfillableQuantity）
- *
- * Cronジョブ（Bearer CRON_SECRET）または画面から（Supabaseセッション）呼び出す
- */
-export async function POST(req: NextRequest) {
-  // 認証: CRON_SECRET or Supabaseセッション
-  const authHeader = req.headers.get("authorization");
-  const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+export const maxDuration = 300;
 
-  if (!isCron) {
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return req.cookies.getAll();
-          },
-          setAll() {},
-        },
-      }
-    );
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-  }
+type FbaSyncResult = {
+  fetched: number;
+  updated: number;
+  asinUpdated: number;
+  matched: number;
+  unmatched: number;
+  unmatchedSamples: { sellerSku: string }[];
+};
 
+async function runFbaSync(emit: EmitFn): Promise<FbaSyncResult> {
   const syncLog = await db.syncLog.create({
     data: { type: SyncType.FBA_INVENTORY, status: SyncStatus.RUNNING },
   });
 
   try {
-    // SP-API から FBA 在庫を全件取得（1回のみ）
-    const fbaItems = await fetchFbaInventory();
+    emit({ type: "phase", label: "SP-API から FBA 在庫を取得中" });
+    const fbaItems = await fetchFbaInventory((current) => {
+      emit({
+        type: "progress",
+        current,
+        label: `FBA在庫 ${current}件取得済み`,
+      });
+    });
+
+    emit({ type: "phase", label: "DB を更新中" });
 
     const products = await db.product.findMany({
       select: { id: true, sku: true, asin: true },
@@ -110,11 +97,32 @@ export async function POST(req: NextRequest) {
     );
 
     // ── まとめてトランザクション実行 ──
+    const totalWrites = asinWrites.length + stockWrites.length;
+    if (totalWrites > 0) {
+      emit({
+        type: "progress",
+        current: 0,
+        total: totalWrites,
+        label: `DB 書き込み中 (${totalWrites}件)`,
+      });
+    }
     if (asinWrites.length > 0) {
       await db.$transaction(asinWrites);
+      emit({
+        type: "progress",
+        current: asinWrites.length,
+        total: totalWrites,
+        label: `DB 書き込み中 (ASIN 完了)`,
+      });
     }
     if (stockWrites.length > 0) {
       await db.$transaction(stockWrites);
+      emit({
+        type: "progress",
+        current: totalWrites,
+        total: totalWrites,
+        label: `DB 書き込み完了`,
+      });
     }
 
     const updated = stockWrites.length;
@@ -129,15 +137,14 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    return NextResponse.json({
-      success: true,
+    return {
       fetched: fbaItems.length,
       updated,
       asinUpdated,
       matched,
       unmatched,
       unmatchedSamples,
-    });
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[sync/fba-inventory]", message);
@@ -151,6 +158,58 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    throw err;
+  }
+}
+
+/**
+ * POST /api/sync/fba-inventory
+ * SP-API から FBA 在庫を取得し、以下を1パスで更新する:
+ *  - products.asin（SKU一致で SP-API 値に更新）
+ *  - products.fba_stock_quantity（fulfillableQuantity）
+ *
+ * Cronジョブ（Bearer CRON_SECRET）または画面から（Supabaseセッション）呼び出す
+ *
+ * Accept: application/x-ndjson を指定すると進捗イベントをストリーミング配信する
+ */
+export async function POST(req: NextRequest) {
+  // 認証: CRON_SECRET or Supabaseセッション
+  const authHeader = req.headers.get("authorization");
+  const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+
+  if (!isCron) {
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return req.cookies.getAll();
+          },
+          setAll() {},
+        },
+      }
+    );
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+  }
+
+  if (wantsStream(req)) {
+    return ndjsonStream(async (emit) => {
+      const result = await runFbaSync(emit);
+      return { success: true, ...result };
+    });
+  }
+
+  try {
+    const result = await runFbaSync(() => {});
+    return NextResponse.json({ success: true, ...result });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

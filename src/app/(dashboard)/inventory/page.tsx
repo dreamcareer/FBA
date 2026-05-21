@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { addMonths } from "date-fns";
+import { SyncStatus, SyncType } from "@prisma/client";
 import { getColorName } from "@/lib/product-colors";
 import SyncButton from "./_components/SyncButton";
 import SearchInput from "./_components/SearchInput";
@@ -58,7 +59,7 @@ export default async function InventoryPage({
       : {}),
   };
 
-  const [products, total] = await Promise.all([
+  const [products, total, lastFbaSyncLog, lastLogilessSyncLog] = await Promise.all([
     db.product.findMany({
       where,
       include: {
@@ -69,6 +70,16 @@ export default async function InventoryPage({
       take: perPage,
     }),
     db.product.count({ where }),
+    db.syncLog.findFirst({
+      where: { type: SyncType.FBA_INVENTORY, status: SyncStatus.SUCCESS },
+      orderBy: { finishedAt: "desc" },
+      select: { finishedAt: true },
+    }),
+    db.syncLog.findFirst({
+      where: { type: SyncType.LOGILESS_INVENTORY, status: SyncStatus.SUCCESS },
+      orderBy: { finishedAt: "desc" },
+      select: { finishedAt: true },
+    }),
   ]);
 
   const minExpiry = addMonths(new Date(), EXPIRY_WARN_MONTHS);
@@ -83,7 +94,10 @@ export default async function InventoryPage({
             全 {total} SKU
           </p>
         </div>
-        <SyncButton />
+        <SyncButton
+          lastFbaSyncAt={lastFbaSyncLog?.finishedAt?.toISOString() ?? null}
+          lastLogilessSyncAt={lastLogilessSyncLog?.finishedAt?.toISOString() ?? null}
+        />
       </div>
 
       {/* カテゴリタブ */}
