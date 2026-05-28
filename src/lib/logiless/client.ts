@@ -138,8 +138,12 @@ async function request<T>(
 /**
  * 全商品マスタを取得（Single商品のみ、什器・備品除外）
  * 簡易版 — FNSKU・フリー項目なし
+ *
+ * onProgress: 各ページ取得後に (取得済み件数, ページ番号) で呼ばれる
  */
-export async function fetchArticles(): Promise<LogilessArticle[]> {
+export async function fetchArticles(
+  onProgress?: (current: number, page: number) => void
+): Promise<LogilessArticle[]> {
   const all: LogilessArticle[] = [];
   let page = 1;
 
@@ -152,6 +156,7 @@ export async function fetchArticles(): Promise<LogilessArticle[]> {
       (a) => a.article_type === "Single" && !a.code.startsWith("2000")
     );
     all.push(...filtered);
+    onProgress?.(all.length, page);
     if (res.data.length < 100) break;
     page++;
   }
@@ -226,7 +231,8 @@ export async function fetchLogicalInventories(): Promise<LogilessLogicalInventor
  * layer=LotNumber でフィルタし、取得件数を大幅に削減
  */
 export async function fetchActualInventories(
-  skus?: string[]
+  skus?: string[],
+  onProgress?: (current: number, page: number) => void
 ): Promise<LogilessActualInventory[]> {
   const all: LogilessActualInventory[] = [];
   let page = 1;
@@ -240,6 +246,7 @@ export async function fetchActualInventories(
       `/actual_inventory_summaries?aggregate_type=expiration_date&layer=LotNumber&page=${page}&limit=100${skuQuery}`
     );
     all.push(...res.data);
+    onProgress?.(all.length, page);
     if (res.data.length < 100) break;
     page++;
   }

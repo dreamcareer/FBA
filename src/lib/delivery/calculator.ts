@@ -12,18 +12,27 @@ const EXPIRY_MIN_MONTHS = 14;        // 最低有効期限（月）
 const EXPIRY_WARN_MONTHS = 18;       // 警告有効期限（月）
 
 const WITH_PRES_QTY_MIN = 10;        // 度あり：最小納品数
-const WITH_PRES_QTY_MAX = 30;        // 度あり：最大納品数
+const WITH_PRES_QTY_MAX = 30;        // 度あり：最大納品数（ハード上限）
 const WITH_PRES_QTY_STEP = 10;       // 度あり：刻み幅
+const WITH_PRES_TARGET = 20;         // 度あり：通常時の目安在庫
 
 const WITHOUT_PRES_QTY_MIN = 10;     // 度なし：最小納品数
 const WITHOUT_PRES_QTY_MAX = 100;    // 度なし：最大納品数
 const WITHOUT_PRES_QTY_STEP = 10;    // 度なし：刻み幅
+
+const SALES_MONTHS = 3;              // business3m の集計月数
+const SALES_TARGET_MULTIPLIER = 1.2; // 月販に対する目標倍率
 
 // ── ユーティリティ ────────────────────────────────────────
 
 /** 指定の刻みで切り上げ（例: 23 → step=10 → 30） */
 function roundUpToStep(value: number, step: number): number {
   return Math.ceil(value / step) * step;
+}
+
+/** 指定の刻みで切り捨て（例: 27 → step=10 → 20） */
+function roundDownToStep(value: number, step: number): number {
+  return Math.floor(value / step) * step;
 }
 
 /** min〜maxにクランプしてstep刻みに調整 */
@@ -88,16 +97,26 @@ function isExpiryWarning(expiryDate: Date | null): boolean {
 function calcWithPrescription(
   product: ProductForCalculation
 ): { quantity: number; skipReason: SkipReason | null } {
-  const { fbaStockQuantity, fbaStockUpperLimit, fbaOpenPoQuantity } = product;
+  const { fbaStockQuantity, fbaStockUpperLimit, fbaOpenPoQuantity, business3m } = product;
 
-  // FBA上限が未設定の場合はスキップ
+  // FBA上限CSVが未取込の SKU はスキップ（マスタ未整備のサイン）
   if (fbaStockUpperLimit === null) {
-    return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
+    return { quantity: 0, skipReason: "FBA_LIMIT_NOT_SET" };
   }
 
-  // FBA上限 - FBA在庫 - 入荷予定 = 不足数（既に納品予定の分を二重カウントしない）
+  // 3ヶ月売上が無い/0 の SKU はスキップ
+  if (!business3m || business3m <= 0) {
+    return { quantity: 0, skipReason: "NO_SALES_DATA" };
+  }
+
+  // 月販×1.2 (月販目安)。通常は WITH_PRES_TARGET(=20) を目安にし、
+  // 月販目安がそれを超えるホット商品のみ WITH_PRES_QTY_MAX(=30) まで伸ばす
+  const monthlyCap = (business3m / SALES_MONTHS) * SALES_TARGET_MULTIPLIER;
+  const effectiveTarget = Math.min(Math.max(WITH_PRES_TARGET, monthlyCap), WITH_PRES_QTY_MAX);
+
+  // 目安在庫 - FBA在庫 - 入荷予定 = 不足数
   const openPo = fbaOpenPoQuantity ?? 0;
-  const needed = fbaStockUpperLimit - fbaStockQuantity - openPo;
+  const needed = effectiveTarget - fbaStockQuantity - openPo;
   if (needed <= 0) {
     return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
   }
@@ -112,16 +131,25 @@ function calcWithPrescription(
 function calcWithoutPrescription(
   product: ProductForCalculation
 ): { quantity: number; skipReason: SkipReason | null } {
-  const { fbaStockQuantity, fbaStockUpperLimit, fbaOpenPoQuantity } = product;
+  const { fbaStockQuantity, fbaStockUpperLimit, fbaOpenPoQuantity, business3m } = product;
 
-  // FBA上限が未設定の場合はスキップ
+  // FBA上限CSVが未取込の SKU はスキップ（マスタ未整備のサイン）
   if (fbaStockUpperLimit === null) {
-    return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
+    return { quantity: 0, skipReason: "FBA_LIMIT_NOT_SET" };
   }
 
-  // FBA上限 - FBA在庫 - 入荷予定 = 不足数（既に納品予定の分を二重カウントしない）
+  // 3ヶ月売上が無い/0 の SKU はスキップ
+  if (!business3m || business3m <= 0) {
+    return { quantity: 0, skipReason: "NO_SALES_DATA" };
+  }
+
+  // 月販×1.2 を目標とし、WITHOUT_PRES_QTY_MAX(=100) でハード上限
+  const monthlyCap = (business3m / SALES_MONTHS) * SALES_TARGET_MULTIPLIER;
+  const effectiveTarget = Math.min(monthlyCap, WITHOUT_PRES_QTY_MAX);
+
+  // 目標 - FBA在庫 - 入荷予定 = 不足数
   const openPo = fbaOpenPoQuantity ?? 0;
-  const needed = fbaStockUpperLimit - fbaStockQuantity - openPo;
+  const needed = effectiveTarget - fbaStockQuantity - openPo;
   if (needed <= 0) {
     return { quantity: 0, skipReason: "FBA_SUFFICIENT" };
   }
@@ -177,9 +205,12 @@ export function calculateDeliveryQuantity(
     return { ...baseResult, skipReason };
   }
 
-  // ロジレス在庫が不足する場合は調整
-  const finalQuantity = Math.min(quantity, availableForDelivery);
-  if (finalQuantity <= 0) {
+  // ロジレス在庫が不足する場合は step 単位で切り捨てて調整
+  const step = product.productType === "WITH_PRESCRIPTION" ? WITH_PRES_QTY_STEP : WITHOUT_PRES_QTY_STEP;
+  const min = product.productType === "WITH_PRESCRIPTION" ? WITH_PRES_QTY_MIN : WITHOUT_PRES_QTY_MIN;
+  const availableStepped = roundDownToStep(availableForDelivery, step);
+  const finalQuantity = Math.min(quantity, availableStepped);
+  if (finalQuantity < min) {
     return { ...baseResult, skipReason: "NO_LOGILESS_STOCK" };
   }
 
@@ -228,6 +259,9 @@ export function calculateBatch(
     let categoryHasDeliverable = false;
 
     for (const product of categoryProducts) {
+      // 目標到達済みなら以降のSKUは計算しない
+      if (runningTotal >= options.targetTotal) break;
+
       const result = calculateDeliveryQuantity(product);
       results.push(result);
 

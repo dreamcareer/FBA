@@ -29,6 +29,8 @@ const SKIP_REASON_LABELS: Record<string, string> = {
   EXPIRY_TOO_CLOSE: "期限14ヶ月未満",
   FBA_SUFFICIENT: "FBA在庫十分",
   UPPER_LIMIT_REACHED: "上限到達",
+  NO_SALES_DATA: "3ヶ月売上データなし",
+  FBA_LIMIT_NOT_SET: "FBA上限未設定",
 };
 
 export default function ProvisionalPlanClient() {
