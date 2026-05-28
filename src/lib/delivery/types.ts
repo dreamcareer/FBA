@@ -40,6 +40,8 @@ export type SkipReason =
   | "EXPIRY_TOO_CLOSE"        // 有効期限14ヶ月未満
   | "FBA_SUFFICIENT"          // FBA在庫十分
   | "UPPER_LIMIT_REACHED"     // FBA上限到達
+  | "NO_SALES_DATA"           // 3ヶ月売上データなし
+  | "FBA_LIMIT_NOT_SET"       // FBA上限未設定（CSV未取込）
 
 export interface CalculationSummary {
   results: DeliveryCalculationResult[];
