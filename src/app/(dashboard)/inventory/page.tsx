@@ -124,7 +124,7 @@ export default async function InventoryPage({
   return (
     <div className="p-6">
       {/* ヘッダー */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="text-lg font-semibold text-gray-900">在庫一覧</h1>
           <p className="text-sm text-gray-500 mt-0.5">

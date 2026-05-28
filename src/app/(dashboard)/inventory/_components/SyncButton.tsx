@@ -343,7 +343,7 @@ export default function SyncButton({ lastFbaSyncAt, lastLogilessSyncAt }: Props)
   }
 
   return (
-    <div className="flex flex-col items-end gap-2">
+    <div className="relative flex flex-col items-end gap-2">
       <div className="flex items-center gap-3">
         {result && !showProgress && (
           <span
@@ -365,9 +365,18 @@ export default function SyncButton({ lastFbaSyncAt, lastLogilessSyncAt }: Props)
             <button
               onClick={() => setMenuOpen((v) => !v)}
               disabled={isLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors min-w-[12rem] whitespace-nowrap"
             >
-              <span className={syncing ? "animate-spin" : ""}>🔄</span>
+              <svg
+                className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`}
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1.8}
+                stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+              </svg>
               {syncing
                 ? loading === "fba"
                   ? "FBA同期中..."
@@ -417,9 +426,18 @@ export default function SyncButton({ lastFbaSyncAt, lastLogilessSyncAt }: Props)
           <button
             onClick={handleFullRefresh}
             disabled={isLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-amber-300 bg-amber-50 text-amber-800 rounded-lg hover:bg-amber-100 disabled:opacity-50 transition-colors"
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm border border-amber-300 bg-amber-50 text-amber-800 rounded-lg hover:bg-amber-100 disabled:opacity-50 transition-colors min-w-[10.5rem] whitespace-nowrap"
           >
-            <span className={loading === "full" ? "animate-spin" : ""}>♻️</span>
+            <svg
+              className={`w-4 h-4 ${loading === "full" ? "animate-spin" : ""}`}
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={1.8}
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" />
+            </svg>
             {loading === "full" ? "再取得中..." : "商品マスタ再取得"}
           </button>
           <span className="text-[10px] text-amber-700/70 leading-tight">
@@ -430,7 +448,7 @@ export default function SyncButton({ lastFbaSyncAt, lastLogilessSyncAt }: Props)
 
       {/* 進捗パネル */}
       {showProgress && (
-        <div className="w-96 px-3.5 py-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+        <div className="absolute top-full right-0 mt-2 w-96 px-3.5 py-3 bg-white border border-gray-200 rounded-lg shadow-lg z-20">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-gray-700">
               {doneSteps === totalSteps
