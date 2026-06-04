@@ -33,14 +33,14 @@ model Product {
 
   // FBA在庫情報（SP-APIから同期）
   fbaStockQuantity   Int       @default(0) @map("fba_stock_quantity")
-  fbaStockUpperLimit Int?      @map("fba_stock_upper_limit")
+  fbaStockUpperLimit Int?      @map("upper_limit")
   fbaStockSyncedAt   DateTime? @map("fba_stock_synced_at")
 
   // FBA上限・入荷予定（週次CSVインポートで更新）
   fbaOpenPoQuantity Int?      @map("fba_open_po_quantity")
-  fbaLimitUpdatedAt DateTime? @map("fba_limit_updated_at")
+  fbaLimitUpdatedAt DateTime? @map("upper_limit_updated_at")
   // 上限指定CSVの数値以外の値（例: 「終売」「できるだけ納品」）をそのまま保持
-  fbaLimitNote      String?   @map("fba_limit_note")
+  fbaLimitNote      String?   @map("upper_limit_note")
 
   // ロジレスに残す在庫数
   logilessStockReserve Int @default(25) @map("logiless_stock_reserve")
