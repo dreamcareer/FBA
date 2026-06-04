@@ -269,15 +269,16 @@ export async function createSalesOrder(
 }
 
 /**
- * 受注のキャンセル
+ * 受注のキャンセル（ロジレスの仕様では "reversal"）
+ * clearsCode=true で同じ受注コード(STA番号)を再利用可能にする
  */
 export async function cancelSalesOrder(
   orderId: number,
-  reuseOrderNo = true
+  clearsCode = true
 ): Promise<void> {
-  await request(`/sales_orders/${orderId}/cancel`, {
+  await request(`/sales_orders/${orderId}/reversal`, {
     method: "POST",
-    body: JSON.stringify({ reuse_order_no: reuseOrderNo }),
+    body: JSON.stringify({ clears_code: clearsCode }),
   });
 }
 

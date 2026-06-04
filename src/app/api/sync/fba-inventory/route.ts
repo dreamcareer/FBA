@@ -16,7 +16,7 @@ type FbaSyncResult = {
   unmatchedSamples: { sellerSku: string }[];
 };
 
-async function runFbaSync(emit: EmitFn): Promise<FbaSyncResult> {
+async function runFbaSync(emit: EmitFn, updateAsin: boolean): Promise<FbaSyncResult> {
   const syncLog = await db.syncLog.create({
     data: { type: SyncType.FBA_INVENTORY, status: SyncStatus.RUNNING },
   });
@@ -70,21 +70,25 @@ async function runFbaSync(emit: EmitFn): Promise<FbaSyncResult> {
     }
 
     // ── ASIN 更新の準備（SKU一致でSP-APIのASINと差分があるもののみ） ──
+    // updateAsin=false（通常のFBA在庫のみ同期）のときは ASIN を触らない。
+    // ASIN 更新は商品マスタ再取得の一環としてのみ行う。
     const asinWrites: ReturnType<typeof db.product.update>[] = [];
     let asinUpdated = 0;
 
-    for (const product of products) {
-      const spApiAsin = skuToSpApiAsin.get(product.sku);
-      if (spApiAsin === undefined) continue;
-      if (product.asin === spApiAsin) continue;
+    if (updateAsin) {
+      for (const product of products) {
+        const spApiAsin = skuToSpApiAsin.get(product.sku);
+        if (spApiAsin === undefined) continue;
+        if (product.asin === spApiAsin) continue;
 
-      asinWrites.push(
-        db.product.update({
-          where: { id: product.id },
-          data: { asin: spApiAsin },
-        })
-      );
-      asinUpdated++;
+        asinWrites.push(
+          db.product.update({
+            where: { id: product.id },
+            data: { asin: spApiAsin },
+          })
+        );
+        asinUpdated++;
+      }
     }
 
     // ── 数量更新の準備 ──
@@ -126,7 +130,8 @@ async function runFbaSync(emit: EmitFn): Promise<FbaSyncResult> {
     }
 
     const updated = stockWrites.length;
-    const message = `数量${updated}件 / ASIN${asinUpdated}件更新（SKU一致: ${matched}、マッチなし: ${unmatched} / SP-API取得: ${fbaItems.length}件）`;
+    const asinPart = updateAsin ? ` / ASIN${asinUpdated}件` : "";
+    const message = `数量${updated}件${asinPart}更新（SKU一致: ${matched}、マッチなし: ${unmatched} / SP-API取得: ${fbaItems.length}件）`;
 
     await db.syncLog.update({
       where: { id: syncLog.id },
@@ -164,9 +169,12 @@ async function runFbaSync(emit: EmitFn): Promise<FbaSyncResult> {
 
 /**
  * POST /api/sync/fba-inventory
- * SP-API から FBA 在庫を取得し、以下を1パスで更新する:
- *  - products.asin（SKU一致で SP-API 値に更新）
- *  - products.fba_stock_quantity（fulfillableQuantity）
+ * SP-API から FBA 在庫を取得して更新する:
+ *  - products.fba_stock_quantity（fulfillableQuantity）← 常に更新
+ *  - products.asin（SKU一致で SP-API 値に更新）← ?withAsin=true のときのみ
+ *
+ * ?withAsin=true は商品マスタ再取得の一環として呼ぶ用途。
+ * 通常の「FBA在庫のみ」同期では ASIN を触らない。
  *
  * Cronジョブ（Bearer CRON_SECRET）または画面から（Supabaseセッション）呼び出す
  *
@@ -198,15 +206,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ?withAsin=true のときだけ ASIN を更新する（商品マスタ再取得の一環）。
+  // 通常の「FBA在庫のみ」同期では ASIN を触らない。
+  const updateAsin = req.nextUrl.searchParams.get("withAsin") === "true";
+
   if (wantsStream(req)) {
     return ndjsonStream(async (emit) => {
-      const result = await runFbaSync(emit);
+      const result = await runFbaSync(emit, updateAsin);
       return { success: true, ...result };
     });
   }
 
   try {
-    const result = await runFbaSync(() => {});
+    const result = await runFbaSync(() => {}, updateAsin);
     return NextResponse.json({ success: true, ...result });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

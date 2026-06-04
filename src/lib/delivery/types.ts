@@ -27,6 +27,8 @@ export interface DeliveryCalculationResult {
   sku: string;
   name: string;
   categoryName: string;
+  fbaStockQuantity: number;        // 現在のFBA在庫数
+  fbaStockUpperLimit: number | null; // FBA上限（CSV取込値）
   suggestedQuantity: number;
   lotNumber: string | null;
   expiryDate: Date | null;

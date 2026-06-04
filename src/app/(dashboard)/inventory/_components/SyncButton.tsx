@@ -222,15 +222,13 @@ export default function SyncButton({ lastFbaSyncAt, lastLogilessSyncAt }: Props)
       }
 
       if (mode === "both" || mode === "fba") {
+        // 通常同期では ASIN を更新しない（withAsin を付けない）
         const r = await streamRequest("/api/sync/fba-inventory", "fba");
         if (!r.ok) {
           setResult(`✗ FBA同期エラー: ${r.error}`);
           return;
         }
-        parts.push(
-          `FBA在庫 ${(r.data.updated as number) ?? 0}件`,
-          `ASIN ${(r.data.asinUpdated as number) ?? 0}件`
-        );
+        parts.push(`FBA在庫 ${(r.data.updated as number) ?? 0}件`);
       }
 
       if (mode === "both" || mode === "logiless") {
@@ -276,7 +274,8 @@ export default function SyncButton({ lastFbaSyncAt, lastLogilessSyncAt }: Props)
         return;
       }
 
-      const r2 = await streamRequest("/api/sync/fba-inventory", "fba");
+      // 商品マスタ再取得のときだけ ASIN も SP-API 値に更新する
+      const r2 = await streamRequest("/api/sync/fba-inventory?withAsin=true", "fba");
       if (!r2.ok) {
         setResult(`✗ FBA同期エラー: ${r2.error}`);
         return;
@@ -318,7 +317,7 @@ export default function SyncButton({ lastFbaSyncAt, lastLogilessSyncAt }: Props)
     {
       mode: "fba",
       label: "FBA在庫のみ",
-      sublabel: "SP-API から FBA 在庫数・ASIN を更新",
+      sublabel: "SP-API から FBA 在庫数を更新",
       lastSync: lastFbaSyncAt,
     },
     {
