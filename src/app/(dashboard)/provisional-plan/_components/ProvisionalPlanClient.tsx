@@ -1,8 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { format } from "date-fns";
+import { useMemo, useState } from "react";
+import { format, parseISO } from "date-fns";
 import type { DeliveryCalculationResult } from "@/lib/delivery/types";
+import {
+  groupIntoPlans,
+  MAX_UNITS_PER_PLAN,
+} from "@/lib/delivery/plan-grouping";
 
 type ProductType = "WITH_PRESCRIPTION" | "WITHOUT_PRESCRIPTION";
 
@@ -52,10 +56,43 @@ export default function ProvisionalPlanClient() {
     Record<string, number>
   >({});
 
+  // プランごとのSTA番号（編集可）と作成済みプランのindex
+  const [staNumbers, setStaNumbers] = useState<Record<number, string>>({});
+  const [createdPlans, setCreatedPlans] = useState<number[]>([]);
+  const [creatingPlan, setCreatingPlan] = useState<number | null>(null);
+
+  // 計算結果を 300点 / 3カラー5SKU のルールで複数プランに分割（計算時に確定）
+  const plans = useMemo(() => {
+    if (!calcResult) return [];
+    return groupIntoPlans(calcResult.results, productType);
+  }, [calcResult, productType]);
+
+  const skippedResults = calcResult?.results.filter((r) => r.skipReason) ?? [];
+  const deliverableResults = calcResult?.results.filter((r) => !r.skipReason) ?? [];
+
+  const qtyOf = (r: DeliveryCalculationResult) =>
+    editedQuantities[r.productId] ?? r.suggestedQuantity;
+
+  const currentTotal = deliverableResults.reduce((sum, r) => sum + qtyOf(r), 0);
+
+  // 納品予定日ベースのSTA番号（STAyyyymmdd-n）。手順書: 日付は納品予定日
+  function defaultSta(planIndex: number): string {
+    let datePart = format(new Date(), "yyyyMMdd");
+    try {
+      datePart = format(parseISO(shipmentDate), "yyyyMMdd");
+    } catch {
+      /* shipmentDate未設定時は今日 */
+    }
+    return `STA${datePart}-${planIndex + 1}`;
+  }
+  const staFor = (i: number) => staNumbers[i] ?? defaultSta(i);
+
   async function handleCalculate() {
     setLoading(true);
     setError(null);
     setEditedQuantities({});
+    setStaNumbers({});
+    setCreatedPlans([]);
 
     try {
       const res = await fetch("/api/delivery-plan/calculate", {
@@ -80,14 +117,14 @@ export default function ProvisionalPlanClient() {
     }
   }
 
-  async function handleCreatePlan(staNumber: string) {
-    if (!calcResult) return;
+  async function handleCreatePlan(planIndex: number) {
+    const plan = plans[planIndex];
+    if (!plan) return;
 
-    const deliverableItems = calcResult.results
-      .filter((r) => !r.skipReason)
+    const items = plan.items
       .map((r) => ({
         productId: r.productId,
-        quantity: editedQuantities[r.productId] ?? r.suggestedQuantity,
+        quantity: qtyOf(r),
         lotNumber: r.lotNumber ?? undefined,
         expiryDate: r.expiryDate
           ? new Date(r.expiryDate).toISOString()
@@ -95,18 +132,19 @@ export default function ProvisionalPlanClient() {
       }))
       .filter((i) => i.quantity > 0);
 
-    if (deliverableItems.length === 0) {
-      alert("納品する商品がありません");
+    if (items.length === 0) {
+      alert("このプランに納品する商品がありません");
       return;
     }
 
-    setLoading(true);
+    const staNumber = staFor(planIndex);
+    setCreatingPlan(planIndex);
     try {
       const res = await fetch("/api/delivery-plan/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items: deliverableItems,
+          items,
           shipmentDate: new Date(shipmentDate).toISOString(),
           logilessOrderCode: staNumber,
         }),
@@ -116,38 +154,18 @@ export default function ProvisionalPlanClient() {
         alert(`エラー: ${data.error}`);
         return;
       }
+      setCreatedPlans((prev) => [...prev, planIndex]);
       alert(
         `✓ 納品プランを作成しました\n` +
-        `STA: ${staNumber}\n` +
-        `合計: ${data.totalQuantity}点`
+          `STA: ${staNumber}\n` +
+          `合計: ${data.totalQuantity}点`
       );
-      setCalcResult(null);
     } catch {
       alert("通信エラーが発生しました");
     } finally {
-      setLoading(false);
+      setCreatingPlan(null);
     }
   }
-
-  const deliverableResults = calcResult?.results.filter((r) => !r.skipReason) ?? [];
-  const skippedResults = calcResult?.results.filter((r) => r.skipReason) ?? [];
-
-  // 編集後の合計
-  const currentTotal = deliverableResults.reduce((sum, r) => {
-    return sum + (editedQuantities[r.productId] ?? r.suggestedQuantity);
-  }, 0);
-
-  // カテゴリ別にグループ化
-  const deliverableByCategory = deliverableResults.reduce<Record<string, typeof deliverableResults>>((acc, r) => {
-    const cat = r.categoryName;
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(r);
-    return acc;
-  }, {});
-
-  // STAナンバー生成
-  const defaultSta = `STA${format(new Date(), "yyyyMMdd")}-1`;
-  const [staNumber, setStaNumber] = useState(defaultSta);
 
   return (
     <div className="p-6 max-w-5xl">
@@ -291,9 +309,9 @@ export default function ProvisionalPlanClient() {
           <div className="grid grid-cols-4 gap-4 mb-4">
             {[
               { label: "合計納品数", value: `${currentTotal}点`, highlight: true },
+              { label: "プラン数", value: `${plans.length}件`, highlight: false },
               { label: "納品SKU数", value: `${deliverableResults.length}SKU`, highlight: false },
               { label: "スキップ数", value: `${skippedResults.length}SKU`, highlight: false },
-              { label: "対象カテゴリ", value: calcResult.summary.categoriesUsed.join(" → "), highlight: false },
             ].map((stat) => (
               <div
                 key={stat.label}
@@ -311,95 +329,147 @@ export default function ProvisionalPlanClient() {
             ))}
           </div>
 
-          {/* プラン作成ボタン */}
-          {deliverableResults.length > 0 && (
-            <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4 flex items-center gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  STA番号
-                </label>
-                <input
-                  type="text"
-                  value={staNumber}
-                  onChange={(e) => setStaNumber(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-48"
-                />
-              </div>
-              <div className="pt-5">
-                <button
-                  onClick={() => handleCreatePlan(staNumber)}
-                  disabled={loading}
-                  className="bg-green-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
-                >
-                  ロジレスに受注登録
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* 納品予定一覧（カテゴリ別） */}
-          {Object.entries(deliverableByCategory).map(([categoryName, items]) => (
-            <div key={categoryName} className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-4">
-              <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-700">
-                  {categoryName} ({items.length}件 / {items.reduce((s, r) => s + (editedQuantities[r.productId] ?? r.suggestedQuantity), 0)}点)
-                </span>
-                <span className="text-xs text-gray-400">
-                  数量は手動で変更できます
-                </span>
-              </div>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50/50">
-                    <th className="text-left px-4 py-2.5 font-medium text-gray-600 text-xs">SKU</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-gray-600 text-xs">商品名</th>
-                    <th className="text-right px-4 py-2.5 font-medium text-gray-600 text-xs">納品数</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-gray-600 text-xs">有効期限</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {items.map((r) => (
-                    <tr
-                      key={r.productId}
-                      className={r.expiryWarning ? "bg-amber-50/50" : ""}
-                    >
-                      <td className="px-4 py-2.5 font-mono text-xs text-gray-500">
-                        {r.sku}
-                      </td>
-                      <td className="px-4 py-2.5 text-gray-900 max-w-xs truncate text-xs">
-                        {r.name}
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
+          {/* プランごとに表示（300点 / 度ありは3カラー5SKU で分割） */}
+          {plans.map((plan, planIndex) => {
+            const planTotal = plan.items.reduce((s, r) => s + qtyOf(r), 0);
+            const overUnits = planTotal > MAX_UNITS_PER_PLAN;
+            const isCreated = createdPlans.includes(planIndex);
+            return (
+              <div
+                key={planIndex}
+                className={`bg-white rounded-xl border overflow-hidden mb-4 ${
+                  isCreated ? "border-green-300" : "border-gray-200"
+                }`}
+              >
+                {/* プランヘッダー */}
+                <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-semibold text-gray-800">
+                      プラン{planIndex + 1}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {plan.items.length}SKU /{" "}
+                      <span className={overUnits ? "text-red-600 font-semibold" : ""}>
+                        {planTotal}点{overUnits && " ⚠300超"}
+                      </span>
+                    </span>
+                    {productType === "WITH_PRESCRIPTION" && (
+                      <span className="text-xs text-gray-400">
+                        カラー: {plan.colorNames.join(", ")}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isCreated ? (
+                      <span className="text-xs font-medium text-green-600">
+                        ✓ 登録済み（{staFor(planIndex)}）
+                      </span>
+                    ) : (
+                      <>
                         <input
-                          type="number"
-                          value={editedQuantities[r.productId] ?? r.suggestedQuantity}
+                          type="text"
+                          value={staFor(planIndex)}
                           onChange={(e) =>
-                            setEditedQuantities((prev) => ({
+                            setStaNumbers((prev) => ({
                               ...prev,
-                              [r.productId]: Number(e.target.value),
+                              [planIndex]: e.target.value,
                             }))
                           }
-                          min={0}
-                          step={10}
-                          className="w-16 border border-gray-200 rounded px-2 py-0.5 text-right text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+                          className="border border-gray-300 rounded-lg px-2.5 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 w-40"
                         />
-                      </td>
-                      <td className="px-4 py-2.5 text-xs">
-                        {r.expiryDate ? (
-                          <span className={r.expiryWarning ? "text-amber-600 font-medium" : "text-gray-400"}>
-                            {new Date(r.expiryDate).toLocaleDateString("ja-JP")}
-                            {r.expiryWarning && " ⚠"}
-                          </span>
-                        ) : (
-                          <span className="text-gray-300">—</span>
-                        )}
-                      </td>
+                        <button
+                          onClick={() => handleCreatePlan(planIndex)}
+                          disabled={creatingPlan !== null}
+                          className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-green-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+                        >
+                          {creatingPlan === planIndex
+                            ? "登録中..."
+                            : "ロジレスに受注登録"}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-gray-50/50">
+                      <th className="text-left px-4 py-2.5 font-medium text-gray-600 text-xs">SKU</th>
+                      <th className="text-left px-4 py-2.5 font-medium text-gray-600 text-xs">商品名</th>
+                      <th className="text-right px-4 py-2.5 font-medium text-gray-600 text-xs">FBA在庫</th>
+                      <th className="text-right px-4 py-2.5 font-medium text-gray-600 text-xs">FBA上限</th>
+                      <th className="text-right px-4 py-2.5 font-medium text-gray-600 text-xs">納品数</th>
+                      <th className="text-left px-4 py-2.5 font-medium text-gray-600 text-xs">有効期限</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {plan.items.map((r) => {
+                      const qty = qtyOf(r);
+                      const overLimit =
+                        r.fbaStockUpperLimit !== null &&
+                        r.fbaStockQuantity + qty > r.fbaStockUpperLimit;
+                      return (
+                        <tr
+                          key={r.productId}
+                          className={
+                            overLimit ? "bg-red-50/60" : r.expiryWarning ? "bg-amber-50/50" : ""
+                          }
+                        >
+                          <td className="px-4 py-2.5 font-mono text-xs text-gray-500">
+                            {r.sku}
+                          </td>
+                          <td className="px-4 py-2.5 text-gray-900 max-w-xs truncate text-xs">
+                            {r.name}
+                          </td>
+                          <td className="px-4 py-2.5 text-right text-xs text-gray-500 tabular-nums">
+                            {r.fbaStockQuantity.toLocaleString()}
+                          </td>
+                          <td
+                            className={`px-4 py-2.5 text-right text-xs tabular-nums ${
+                              overLimit ? "text-red-600 font-semibold" : "text-gray-500"
+                            }`}
+                          >
+                            {r.fbaStockUpperLimit?.toLocaleString() ?? "—"}
+                            {overLimit && <span className="ml-0.5">⚠</span>}
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            <input
+                              type="number"
+                              value={qty}
+                              disabled={isCreated}
+                              onChange={(e) =>
+                                setEditedQuantities((prev) => ({
+                                  ...prev,
+                                  [r.productId]: Number(e.target.value),
+                                }))
+                              }
+                              min={0}
+                              step={10}
+                              className={`w-16 border rounded px-2 py-0.5 text-right text-sm focus:outline-none focus:ring-1 disabled:bg-gray-100 disabled:text-gray-400 ${
+                                overLimit
+                                  ? "border-red-400 text-red-600 focus:ring-red-400"
+                                  : "border-gray-200 focus:ring-blue-400"
+                              }`}
+                            />
+                          </td>
+                          <td className="px-4 py-2.5 text-xs">
+                            {r.expiryDate ? (
+                              <span className={r.expiryWarning ? "text-amber-600 font-medium" : "text-gray-400"}>
+                                {new Date(r.expiryDate).toLocaleDateString("ja-JP")}
+                                {r.expiryWarning && " ⚠"}
+                              </span>
+                            ) : (
+                              <span className="text-gray-300">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
 
           {/* スキップ一覧（折りたたみ） */}
           {skippedResults.length > 0 && (

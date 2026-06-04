@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { format } from "date-fns";
 import { DELIVERY_PLAN_STATUS_LABELS } from "@/types";
 import type { DeliveryPlanStatus } from "@prisma/client";
+import CancelButton from "./_components/CancelButton";
 
 const STATUS_COLORS: Record<DeliveryPlanStatus, string> = {
   DRAFT:      "bg-gray-100 text-gray-600",
@@ -80,6 +81,13 @@ export default async function DeliveryPlanPage({
                     <span>{plan._count.items} SKU / {totalQty}点</span>
                   </div>
                 </div>
+
+                {(plan.status === "DRAFT" || plan.status === "SUBMITTED") && (
+                  <CancelButton
+                    planId={plan.id}
+                    orderCode={plan.logilessOrderCode ?? plan.name}
+                  />
+                )}
               </div>
 
               {/* 商品一覧（展開） */}

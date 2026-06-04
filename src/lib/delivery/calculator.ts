@@ -23,6 +23,12 @@ const WITHOUT_PRES_QTY_STEP = 10;    // 度なし：刻み幅
 const SALES_MONTHS = 3;              // business3m の集計月数
 const SALES_TARGET_MULTIPLIER = 1.2; // 月販に対する目標倍率
 
+// ロジレスに残す在庫数（在庫引当）— 度あり/度なしで異なる
+const RESERVE_WITH_PRES_DEFAULT = 25;     // 度あり：基本
+const RESERVE_WITH_PRES_PIXIE = 35;       // 度あり：Pixie
+const RESERVE_WITHOUT_PRES_DEFAULT = 50;  // 度なし：基本
+const RESERVE_WITHOUT_PRES_PIXIE = 300;   // 度なし：Pixie
+
 // ── ユーティリティ ────────────────────────────────────────
 
 /** 指定の刻みで切り上げ（例: 23 → step=10 → 30） */
@@ -143,9 +149,9 @@ function calcWithoutPrescription(
     return { quantity: 0, skipReason: "NO_SALES_DATA" };
   }
 
-  // 月販×1.2 を目標とし、WITHOUT_PRES_QTY_MAX(=100) でハード上限
-  const monthlyCap = (business3m / SALES_MONTHS) * SALES_TARGET_MULTIPLIER;
-  const effectiveTarget = Math.min(monthlyCap, WITHOUT_PRES_QTY_MAX);
+  // 手順書: 目標在庫 = 3か月売上(business3m) × 1.2。WITHOUT_PRES_QTY_MAX(=100) でハード上限
+  const salesTarget = business3m * SALES_TARGET_MULTIPLIER;
+  const effectiveTarget = Math.min(salesTarget, WITHOUT_PRES_QTY_MAX);
 
   // 目標 - FBA在庫 - 入荷予定 = 不足数
   const openPo = fbaOpenPoQuantity ?? 0;
@@ -169,6 +175,8 @@ export function calculateDeliveryQuantity(
     sku: product.sku,
     name: product.name,
     categoryName: product.categoryName,
+    fbaStockQuantity: product.fbaStockQuantity,
+    fbaStockUpperLimit: product.fbaStockUpperLimit,
     suggestedQuantity: 0,
     lotNumber: null,
     expiryDate: null,
@@ -184,8 +192,16 @@ export function calculateDeliveryQuantity(
   // 納品可能ロット取得
   const deliverableLots = getDeliverableLots(product.logilessInventories);
 
-  // ロジレスに残す在庫数（Pixie: 35、その他: 25）
-  const reserve = product.categoryName === "Pixie" ? 35 : 25;
+  // ロジレスに残す在庫数（度あり: 基本25/Pixie35、度なし: 基本50/Pixie300）
+  const isPixie = product.categoryName === "Pixie";
+  const reserve =
+    product.productType === "WITH_PRESCRIPTION"
+      ? isPixie
+        ? RESERVE_WITH_PRES_PIXIE
+        : RESERVE_WITH_PRES_DEFAULT
+      : isPixie
+        ? RESERVE_WITHOUT_PRES_PIXIE
+        : RESERVE_WITHOUT_PRES_DEFAULT;
 
   // 利用可能在庫の合計（reserve控除後）
   const totalDeliverable = deliverableLots.reduce((sum, l) => sum + l.quantity, 0);
@@ -209,10 +225,28 @@ export function calculateDeliveryQuantity(
   const step = product.productType === "WITH_PRESCRIPTION" ? WITH_PRES_QTY_STEP : WITHOUT_PRES_QTY_STEP;
   const min = product.productType === "WITH_PRESCRIPTION" ? WITH_PRES_QTY_MIN : WITHOUT_PRES_QTY_MIN;
   const availableStepped = roundDownToStep(availableForDelivery, step);
-  const finalQuantity = Math.min(quantity, availableStepped);
-  if (finalQuantity < min) {
+  if (availableStepped < min) {
     return { ...baseResult, skipReason: "NO_LOGILESS_STOCK" };
   }
+
+  // FBA在庫が既にFBA上限を超えている商品は納品不要なので一覧に出さない（上限が10等でも同様）
+  if (product.fbaStockQuantity > product.fbaStockUpperLimit!) {
+    return { ...baseResult, skipReason: "UPPER_LIMIT_REACHED" };
+  }
+
+  // FBA上限までの余裕(step切り捨て)を算出。最小納品数すら入らない場合は
+  // 納品しても上限超過になるだけなので「上限到達」としてスキップする。
+  const openPoForLimit = product.fbaOpenPoQuantity ?? 0;
+  const limitHeadroom = roundDownToStep(
+    Math.max(0, product.fbaStockUpperLimit! - product.fbaStockQuantity - openPoForLimit),
+    step
+  );
+  if (limitHeadroom < min) {
+    return { ...baseResult, skipReason: "UPPER_LIMIT_REACHED" };
+  }
+
+  // 上限を超えないよう、余裕の範囲で納品数をキャップする
+  const finalQuantity = Math.min(quantity, availableStepped, limitHeadroom);
 
   // 使用するロットを特定（期限の近い順）
   const usedLot = deliverableLots[0];
