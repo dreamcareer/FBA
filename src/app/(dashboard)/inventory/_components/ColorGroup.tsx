@@ -20,6 +20,7 @@ type Product = {
   productType: string;
   fbaStockQuantity: number;
   fbaStockUpperLimit: number | null;
+  fbaLimitNote: string | null;
   fbaOpenPoQuantity: number | null;
   business3m: number | null;
 };

@@ -25,10 +25,10 @@ export default async function FbaLimitsImportPage() {
           ← 在庫一覧に戻る
         </Link>
         <h1 className="text-lg font-semibold text-gray-900 mt-2">
-          FBA容量上限 CSV取り込み
+          FBA上限指定 CSV取り込み
         </h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          Amazonセラーセントラルからエクスポートした容量上限CSVを取り込みます
+          SKUごとのFBA上限指定CSV（SKU, 上限指定）を取り込みます
         </p>
       </div>
 
@@ -64,16 +64,15 @@ export default async function FbaLimitsImportPage() {
       <div className="mt-6 rounded-lg bg-gray-50 border border-gray-200 p-4 text-xs text-gray-600 space-y-2">
         <p className="font-semibold text-gray-700">取り込みについて</p>
         <ul className="list-disc list-inside space-y-1">
-          <li>Child_ASIN を商品マスタの ASIN と突合します</li>
+          <li>1列目の <span className="font-mono">SKU</span> を商品マスタの SKU と突合します</li>
           <li>
-            <span className="font-mono">Upper_Limit</span> →
-            FBA上限、<span className="font-mono">Open_PO_Quantity</span> → 入荷予定 として保存します
+            2列目の <span className="font-mono">上限指定</span> が数値の場合は FBA上限として保存します
           </li>
           <li>
-            <span className="font-mono">On_Hand_Quantity</span>{" "}
-            は SP-API同期で管理されるためCSVからは更新しません
+            「終売」「できるだけ納品」等のテキストはそのまま備考として保存・表示します
           </li>
-          <li>商品マスタに存在しないASINはスキップされます</li>
+          <li>上限指定が空欄の行はスキップします（変更なし）</li>
+          <li>商品マスタに存在しないSKUはスキップされます</li>
           <li>文字コード: Shift-JIS / UTF-8 BOM どちらでも可</li>
         </ul>
       </div>

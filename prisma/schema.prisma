@@ -39,6 +39,8 @@ model Product {
   // FBA上限・入荷予定（週次CSVインポートで更新）
   fbaOpenPoQuantity Int?      @map("fba_open_po_quantity")
   fbaLimitUpdatedAt DateTime? @map("fba_limit_updated_at")
+  // 上限指定CSVの数値以外の値（例: 「終売」「できるだけ納品」）をそのまま保持
+  fbaLimitNote      String?   @map("fba_limit_note")
 
   // ロジレスに残す在庫数
   logilessStockReserve Int @default(25) @map("logiless_stock_reserve")

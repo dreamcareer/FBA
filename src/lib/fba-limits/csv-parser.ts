@@ -1,8 +1,12 @@
 /**
- * AmazonセラーセントラルからエクスポートされるFBA容量上限CSVをパースする。
+ * FBA上限指定CSVをパースする。
  *
- * フォーマット:
- *   Parent_ASIN,Child_ASIN,Item_Name,Upper_Limit,On_Hand_Quantity,Open_PO_Quantity
+ * フォーマット（2列）:
+ *   SKU,上限指定
+ *   例: 1d10eb750,20
+ *
+ * 上限指定の値は数値（FBA上限）のほか、空欄や「終売」「できるだけ納品」等の
+ * テキストが入る場合がある。
  *
  * 文字コードはShift-JISが標準（UTF-8 BOM付きにもフォールバック対応）。
  */

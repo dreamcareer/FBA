@@ -10,8 +10,7 @@ type ImportResult = {
     updated: number;
     unmatched: number;
     unmatchedSamples: string[];
-    invalidRows: number;
-    invalidRowSamples: number[];
+    skippedEmpty: number;
     importedAt: string;
   };
   error?: string;
@@ -69,7 +68,7 @@ export default function ImportForm() {
             className="block w-full text-sm text-gray-700 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 disabled:opacity-50"
           />
           <p className="text-xs text-gray-400 mt-1">
-            Parent_ASIN, Child_ASIN, Item_Name, Upper_Limit, On_Hand_Quantity, Open_PO_Quantity 列を含むCSV
+            SKU, 上限指定 の2列を含むCSV（例: 1d10eb750,20）
           </p>
         </div>
 
@@ -96,31 +95,21 @@ export default function ImportForm() {
               <ul className="space-y-1 text-xs">
                 <li>CSV総行数: {result.data.totalRows.toLocaleString()} 件</li>
                 <li>更新: {result.data.updated.toLocaleString()} 件</li>
-                <li>ASIN未登録（スキップ）: {result.data.unmatched.toLocaleString()} 件</li>
-                {result.data.invalidRows > 0 && (
-                  <li>数値解析エラー: {result.data.invalidRows.toLocaleString()} 件</li>
+                <li>SKU未登録（スキップ）: {result.data.unmatched.toLocaleString()} 件</li>
+                {result.data.skippedEmpty > 0 && (
+                  <li>上限指定が空欄（スキップ）: {result.data.skippedEmpty.toLocaleString()} 件</li>
                 )}
               </ul>
               {result.data.unmatchedSamples.length > 0 && (
                 <details className="mt-2">
                   <summary className="cursor-pointer text-xs text-gray-600">
-                    未登録ASINサンプル（最大20件）
+                    未登録SKUサンプル（最大20件）
                   </summary>
                   <ul className="mt-1.5 pl-4 text-xs font-mono text-gray-500 space-y-0.5">
-                    {result.data.unmatchedSamples.map((asin) => (
-                      <li key={asin}>{asin}</li>
+                    {result.data.unmatchedSamples.map((sku, i) => (
+                      <li key={`${sku}-${i}`}>{sku}</li>
                     ))}
                   </ul>
-                </details>
-              )}
-              {result.data.invalidRowSamples.length > 0 && (
-                <details className="mt-2">
-                  <summary className="cursor-pointer text-xs text-gray-600">
-                    数値解析エラー行（最大20件）
-                  </summary>
-                  <p className="mt-1.5 pl-4 text-xs font-mono text-gray-500">
-                    行番号: {result.data.invalidRowSamples.join(", ")}
-                  </p>
                 </details>
               )}
             </div>

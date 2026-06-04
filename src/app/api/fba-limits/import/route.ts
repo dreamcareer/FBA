@@ -3,17 +3,17 @@ import { createServerClient } from "@supabase/ssr";
 import { db } from "@/lib/db";
 import { parseCsv } from "@/lib/fba-limits/csv-parser";
 
-const REQUIRED_HEADERS = ["Child_ASIN", "Upper_Limit", "Open_PO_Quantity"] as const;
+const REQUIRED_HEADERS = ["SKU", "上限指定"] as const;
 
 /**
  * POST /api/fba-limits/import
- * Amazonセラーセントラル容量モニターのCSVを受け取り、
- * Child_ASIN で products.asin と突合して以下を更新:
- *   - fba_stock_upper_limit (= Upper_Limit)
- *   - fba_open_po_quantity  (= Open_PO_Quantity)
- *   - fba_limit_updated_at  (= 取り込み日時)
+ * FBA上限指定CSV（SKU,上限指定）を受け取り、
+ * SKU で products.sku と突合して以下を更新:
+ *   - fba_stock_upper_limit (= 上限指定が数値の場合のみ。テキスト時は null)
+ *   - fba_limit_note         (= 上限指定が数値以外のテキスト。例「終売」「できるだけ納品」)
+ *   - fba_limit_updated_at   (= 取り込み日時)
  *
- * On_Hand_Quantity は SP-API 同期で管理されるため CSV からは更新しない。
+ * 上限指定が空欄の行はスキップし、何も更新しない。
  */
 export async function POST(req: NextRequest) {
   const supabase = createServerClient(
@@ -66,56 +66,61 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const childAsinIdx = headerIndex.get("Child_ASIN")!;
-  const upperLimitIdx = headerIndex.get("Upper_Limit")!;
-  const openPoIdx = headerIndex.get("Open_PO_Quantity")!;
+  const skuIdx = headerIndex.get("SKU")!;
+  const limitIdx = headerIndex.get("上限指定")!;
 
-  // ASIN → productId のマップ作成
+  // SKU → productId のマップ作成
   const products = await db.product.findMany({
-    where: { asin: { not: null } },
-    select: { id: true, asin: true },
+    select: { id: true, sku: true },
   });
-  const asinToId = new Map<string, string>();
+  const skuToId = new Map<string, string>();
   for (const p of products) {
-    if (p.asin) asinToId.set(p.asin, p.id);
+    skuToId.set(p.sku, p.id);
   }
 
   // 更新対象を組み立て
   const now = new Date();
   const updates: ReturnType<typeof db.product.update>[] = [];
-  const unmatchedAsins: string[] = [];
-  const invalidRows: number[] = [];
+  const unmatchedSkus: string[] = [];
+  let skippedEmpty = 0;
   let updatedCount = 0;
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    const asin = row[childAsinIdx]?.trim();
-    if (!asin) continue;
+    const sku = row[skuIdx]?.trim();
+    if (!sku) continue;
 
-    const upperLimitStr = row[upperLimitIdx]?.trim();
-    const openPoStr = row[openPoIdx]?.trim();
-    const upperLimit = parseInt(upperLimitStr, 10);
-    const openPo = parseInt(openPoStr, 10);
-
-    if (Number.isNaN(upperLimit) || Number.isNaN(openPo)) {
-      invalidRows.push(i + 2); // ヘッダー行を考慮した実際の行番号
+    // 上限指定が空欄の行はスキップ（変更なし）
+    const limitStr = row[limitIdx]?.trim() ?? "";
+    if (limitStr === "") {
+      skippedEmpty++;
       continue;
     }
 
-    const productId = asinToId.get(asin);
+    const productId = skuToId.get(sku);
     if (!productId) {
-      unmatchedAsins.push(asin);
+      unmatchedSkus.push(sku);
       continue;
     }
+
+    // 数値なら上限値として保存、それ以外のテキストはノートとしてそのまま保持
+    const upperLimit = parseInt(limitStr, 10);
+    const isNumeric = /^\d+$/.test(limitStr);
 
     updates.push(
       db.product.update({
         where: { id: productId },
-        data: {
-          fbaStockUpperLimit: upperLimit,
-          fbaOpenPoQuantity: openPo,
-          fbaLimitUpdatedAt: now,
-        },
+        data: isNumeric
+          ? {
+              fbaStockUpperLimit: upperLimit,
+              fbaLimitNote: null,
+              fbaLimitUpdatedAt: now,
+            }
+          : {
+              fbaStockUpperLimit: null,
+              fbaLimitNote: limitStr,
+              fbaLimitUpdatedAt: now,
+            },
       })
     );
     updatedCount++;
@@ -132,10 +137,9 @@ export async function POST(req: NextRequest) {
     data: {
       totalRows: rows.length,
       updated: updatedCount,
-      unmatched: unmatchedAsins.length,
-      unmatchedSamples: unmatchedAsins.slice(0, 20),
-      invalidRows: invalidRows.length,
-      invalidRowSamples: invalidRows.slice(0, 20),
+      unmatched: unmatchedSkus.length,
+      unmatchedSamples: unmatchedSkus.slice(0, 20),
+      skippedEmpty,
       importedAt: now.toISOString(),
     },
   });
