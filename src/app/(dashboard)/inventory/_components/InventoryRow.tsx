@@ -20,6 +20,7 @@ type Props = {
     productType: string;
     fbaStockQuantity: number;
     fbaStockUpperLimit: number | null;
+    fbaLimitNote: string | null;
     fbaOpenPoQuantity: number | null;
     business3m: number | null;
   };
@@ -42,12 +43,11 @@ export default function InventoryRow({ product, lots, stripe, minExpiry }: Props
   const expiryWarning = nearestExpiry && nearestExpiry < new Date(minExpiry);
   const isLowFba = product.fbaStockQuantity < (product.business3m ?? 0) * 0.5;
 
-  // FBA在庫＋入荷予定が上限に達しているかの判定
+  // FBA在庫が上限に達しているかの判定（入荷予定は新CSVで管理しなくなったため在庫数のみで判定）
   const openPo = product.fbaOpenPoQuantity ?? 0;
-  const projectedTotal = product.fbaStockQuantity + openPo;
   const isAtCapacity =
     product.fbaStockUpperLimit !== null &&
-    projectedTotal >= product.fbaStockUpperLimit;
+    product.fbaStockQuantity >= product.fbaStockUpperLimit;
 
   const formatDate = (d: Date) =>
     d.toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
@@ -72,8 +72,14 @@ export default function InventoryRow({ product, lots, stripe, minExpiry }: Props
             : <span className="text-teal-600">度なし</span>}
         </td>
         <td className={`px-3 py-0.5 text-right tabular-nums ${isAtCapacity ? "text-red-600 font-semibold" : "text-gray-400"}`}>
-          {product.fbaStockUpperLimit?.toLocaleString() ?? "—"}
-          {isAtCapacity && <span className="ml-0.5">⚠</span>}
+          {product.fbaLimitNote ? (
+            <span className="text-gray-600">{product.fbaLimitNote}</span>
+          ) : (
+            <>
+              {product.fbaStockUpperLimit?.toLocaleString() ?? "—"}
+              {isAtCapacity && <span className="ml-0.5">⚠</span>}
+            </>
+          )}
         </td>
         <td className={`px-3 py-0.5 text-right tabular-nums ${isLowFba ? "text-red-600 font-semibold" : "text-gray-700"}`}>
           {product.fbaStockQuantity.toLocaleString()}

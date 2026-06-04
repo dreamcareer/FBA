@@ -337,6 +337,7 @@ export default async function InventoryPage({
                       productType: item.product.productType,
                       fbaStockQuantity: item.product.fbaStockQuantity,
                       fbaStockUpperLimit: item.product.fbaStockUpperLimit,
+                      fbaLimitNote: item.product.fbaLimitNote,
                       fbaOpenPoQuantity: item.product.fbaOpenPoQuantity,
                       business3m: item.product.business3m,
                     },
