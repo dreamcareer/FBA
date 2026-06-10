@@ -1,4 +1,5 @@
 import { addMonths, isAfter, isBefore } from "date-fns";
+import { getColorName } from "@/lib/product-colors";
 import type {
   CalculationSummary,
   DeliveryCalculationResult,
@@ -22,6 +23,11 @@ const WITHOUT_PRES_QTY_STEP = 10;    // 度なし：刻み幅
 
 const SALES_MONTHS = 3;              // business3m の集計月数
 const SALES_TARGET_MULTIPLIER = 1.2; // 月販に対する目標倍率
+
+// カラーを丸ごと追加するとき目標合計を超えてよい許容点数。
+// これを超えるカラーは丸ごと翌日回しにする
+export const OVERSHOOT_ALLOWANCE_WITH_PRES = 200;  // 度あり: 500点目標 → 700点まで許容
+export const OVERSHOOT_ALLOWANCE_WITHOUT_PRES = 0; // 度なし: 1000点のまま（超過なし）
 
 // ロジレスに残す在庫数（在庫引当）— 度あり/度なしで異なる
 const RESERVE_WITH_PRES_DEFAULT = 25;     // 度あり：基本
@@ -265,12 +271,50 @@ export function calculateDeliveryQuantity(
 // ── バッチ計算 ────────────────────────────────────────────
 
 export interface BatchCalculationOptions {
-  targetTotal: number;       // 目標合計（度あり:500、度なし:1000）
-  maxPerPlan: number;        // 1プランあたり最大SKU数（300）
-  maxCategories?: number;    // 度あり: 最大3カテゴリ、度なし: 1カテゴリ
-  categoryOrder: string[];   // カテゴリ優先順
+  targetTotal: number;         // 目標合計（度あり:500、度なし:1000）
+  maxPerPlan: number;          // 1プランあたり最大SKU数（300）
+  maxCategories?: number;      // 度あり: 最大3カテゴリ、度なし: 1カテゴリ
+  categoryOrder: string[];     // カテゴリ優先順
+  overshootAllowance?: number; // カラー丸ごと追加時に目標を超えてよい点数（度あり200 / 度なし0）
+  resumeAfterColors?: string[]; // 前回作成済みのカラー群。並び順で最後のカラーの次から計算を開始する
 }
 
+interface ColorGroup {
+  categoryName: string;
+  colorName: string;
+  products: ProductForCalculation[];
+}
+
+/** カテゴリ優先順・SKU順を保ったまま、カラー単位のグループ列を作る */
+function buildColorGroups(
+  products: ProductForCalculation[],
+  categoryOrder: string[]
+): ColorGroup[] {
+  const groups: ColorGroup[] = [];
+  for (const categoryName of categoryOrder) {
+    const byColor = new Map<string, ProductForCalculation[]>();
+    for (const p of products) {
+      if (p.categoryName !== categoryName) continue;
+      const color = getColorName(p.name);
+      const list = byColor.get(color);
+      if (list) list.push(p);
+      else byColor.set(color, [p]);
+    }
+    for (const [colorName, colorProducts] of byColor) {
+      groups.push({ categoryName, colorName, products: colorProducts });
+    }
+  }
+  return groups;
+}
+
+/**
+ * カラー単位で納品予定を積み上げる。
+ *
+ * - カラーは丸ごと入れるか丸ごと外すか（途中で切らない）
+ * - 丸ごと入れて目標+許容点数（maxTotal）を超えるカラーは翌日回し（deferredColor）にして終了
+ * - resumeAfterColors（前回作成済みカラー）が渡された場合は、並び順で
+ *   その最後のカラーの次から開始する（前回の続き = 翌日回しカラーが先頭に来る）
+ */
 export function calculateBatch(
   products: ProductForCalculation[],
   options: BatchCalculationOptions
@@ -279,38 +323,68 @@ export function calculateBatch(
   let runningTotal = 0;
   const categoriesUsed: string[] = [];
   const maxCats = options.maxCategories ?? options.categoryOrder.length;
+  const maxTotal = options.targetTotal + (options.overshootAllowance ?? 0);
 
-  // カテゴリ順に処理
-  for (const categoryName of options.categoryOrder) {
-    // カテゴリ上限に達したら終了
-    if (categoriesUsed.length >= maxCats) break;
+  let colorGroups = buildColorGroups(products, options.categoryOrder);
 
-    const categoryProducts = products.filter(
-      (p) => p.categoryName === categoryName
-    );
-    if (categoryProducts.length === 0) continue;
-
-    let categoryHasDeliverable = false;
-
-    for (const product of categoryProducts) {
-      // 目標到達済みなら以降のSKUは計算しない
-      if (runningTotal >= options.targetTotal) break;
-
-      const result = calculateDeliveryQuantity(product);
-      results.push(result);
-
-      if (!result.skipReason) {
-        runningTotal += result.suggestedQuantity;
-        categoryHasDeliverable = true;
-      }
+  // 前回の続きから: 作成済みカラーのうち並び順で最後のものを探し、その次へ回転させる
+  // （作成済みカラーは末尾に回り、FBA在庫十分などのスキップ判定に委ねる）
+  let resumedAfterColor: string | null = null;
+  if (options.resumeAfterColors?.length) {
+    const delivered = new Set(options.resumeAfterColors);
+    let lastIdx = -1;
+    colorGroups.forEach((g, i) => {
+      if (delivered.has(g.colorName)) lastIdx = i;
+    });
+    if (lastIdx >= 0) {
+      resumedAfterColor = colorGroups[lastIdx].colorName;
+      colorGroups = [
+        ...colorGroups.slice(lastIdx + 1),
+        ...colorGroups.slice(0, lastIdx + 1),
+      ];
     }
+  }
 
-    if (categoryHasDeliverable) {
-      categoriesUsed.push(categoryName);
-    }
+  let deferredColor: string | null = null;
 
-    // 目標超えたら次のカテゴリに進まない
+  for (const group of colorGroups) {
+    // 目標到達済みなら新しいカラーには進まない
     if (runningTotal >= options.targetTotal) break;
+
+    // カテゴリ上限: 未使用カテゴリは上限到達後は処理しない
+    const isNewCategory = !categoriesUsed.includes(group.categoryName);
+    if (isNewCategory && categoriesUsed.length >= maxCats) continue;
+
+    // カラー内の全SKUを計算
+    const groupResults = group.products.map(calculateDeliveryQuantity);
+    const colorTotal = groupResults
+      .filter((r) => !r.skipReason)
+      .reduce((s, r) => s + r.suggestedQuantity, 0);
+
+    // 納品対象なし（全SKUスキップ）→ 理由表示のため結果には含めて次へ
+    if (colorTotal === 0) {
+      results.push(...groupResults);
+      continue;
+    }
+
+    // 丸ごと入れると許容上限を超えるカラーは翌日回しにして終了。
+    // ただし最初のカラー（runningTotal=0）まで外すとプランが空になり
+    // 永遠に作成できないため、最初のカラーは超過しても採用する
+    if (runningTotal + colorTotal > maxTotal && runningTotal > 0) {
+      results.push(
+        ...groupResults.map((r) =>
+          r.skipReason
+            ? r
+            : { ...r, suggestedQuantity: 0, skipReason: "TARGET_EXCEEDED" as SkipReason }
+        )
+      );
+      deferredColor = group.colorName;
+      break;
+    }
+
+    results.push(...groupResults);
+    runningTotal += colorTotal;
+    if (isNewCategory) categoriesUsed.push(group.categoryName);
   }
 
   const deliverable = results.filter((r) => !r.skipReason);
@@ -322,5 +396,8 @@ export function calculateBatch(
     deliverableCount: deliverable.length,
     skippedCount: skipped.length,
     categoriesUsed,
+    maxTotal,
+    deferredColor,
+    resumedAfterColor,
   };
 }

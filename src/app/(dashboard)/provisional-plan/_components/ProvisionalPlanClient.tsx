@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { format, parseISO } from "date-fns";
 import type { DeliveryCalculationResult } from "@/lib/delivery/types";
 import {
   groupIntoPlans,
   MAX_UNITS_PER_PLAN,
 } from "@/lib/delivery/plan-grouping";
+import { getShipmentSchedule } from "@/lib/delivery/shipment-schedule";
+import { getColorName } from "@/lib/product-colors";
 
 type ProductType = "WITH_PRESCRIPTION" | "WITHOUT_PRESCRIPTION";
 
@@ -16,9 +18,25 @@ interface CalculationResponse {
     deliverableCount: number;
     skippedCount: number;
     categoriesUsed: string[];
+    maxTotal: number;
+    deferredColor: string | null;
+    resumedAfterColor: string | null;
   };
+  resumeInfo: {
+    workDate: string;
+    staNumber: string | null;
+    afterColor: string;
+  } | null;
   results: DeliveryCalculationResult[];
   lastSku: string | null;
+}
+
+interface StoredEndPosition {
+  categoryName: string | null;
+  colorName: string | null;
+  lastSku: string | null;
+  deferredColor: string | null;
+  updatedAt: string;
 }
 
 const PRESCRIPTION_CATEGORIES = [
@@ -35,17 +53,27 @@ const SKIP_REASON_LABELS: Record<string, string> = {
   UPPER_LIMIT_REACHED: "上限到達",
   NO_SALES_DATA: "3ヶ月売上データなし",
   FBA_LIMIT_NOT_SET: "FBA上限未設定",
+  TARGET_EXCEEDED: "目標超過のため翌日回し",
 };
 
 export default function ProvisionalPlanClient() {
-  const [productType, setProductType] = useState<ProductType>("WITH_PRESCRIPTION");
-  const [targetTotal, setTargetTotal] = useState(500);
+  // 手順書の週次スケジュール（今日の曜日 → 出荷曜日・種別・目標点数）
+  const schedule = useMemo(() => getShipmentSchedule(new Date()), []);
+
+  const [productType, setProductType] = useState<ProductType>(
+    schedule?.productType ?? "WITH_PRESCRIPTION"
+  );
+  const [targetTotal, setTargetTotal] = useState(schedule?.targetTotal ?? 500);
   const [selectedCategories, setSelectedCategories] = useState<string[]>(
-    PRESCRIPTION_CATEGORIES.slice(0, 3)
+    (schedule?.productType ?? "WITH_PRESCRIPTION") === "WITH_PRESCRIPTION"
+      ? PRESCRIPTION_CATEGORIES.slice(0, 3)
+      : []
   );
   const [shipmentDate, setShipmentDate] = useState(
-    format(new Date(), "yyyy-MM-dd")
+    format(schedule?.shipmentDate ?? new Date(), "yyyy-MM-dd")
   );
+  // 前回作成済みカラーの続きから計算する（翌日回しカラーが先頭に来る）
+  const [resume, setResume] = useState(true);
 
   const [loading, setLoading] = useState(false);
   const [calcResult, setCalcResult] = useState<CalculationResponse | null>(null);
@@ -61,6 +89,17 @@ export default function ProvisionalPlanClient() {
   const [createdPlans, setCreatedPlans] = useState<number[]>([]);
   const [creatingPlan, setCreatingPlan] = useState<number | null>(null);
 
+  // DBに保存済みの前回の終了位置
+  const [storedEndPosition, setStoredEndPosition] =
+    useState<StoredEndPosition | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/delivery-plan/end-position?productType=${productType}`)
+      .then((res) => res.json())
+      .then((data) => setStoredEndPosition(data.data ?? null))
+      .catch(() => setStoredEndPosition(null));
+  }, [productType]);
+
   // 計算結果を 300点 / 3カラー5SKU のルールで複数プランに分割（計算時に確定）
   const plans = useMemo(() => {
     if (!calcResult) return [];
@@ -74,6 +113,15 @@ export default function ProvisionalPlanClient() {
     editedQuantities[r.productId] ?? r.suggestedQuantity;
 
   const currentTotal = deliverableResults.reduce((sum, r) => sum + qtyOf(r), 0);
+
+  // 計算がどこで終わったか（最後に納品対象になったカテゴリ・カラー・SKU）
+  const lastDeliverable = deliverableResults.at(-1) ?? null;
+  const unreachedCategories =
+    productType === "WITH_PRESCRIPTION" && calcResult
+      ? selectedCategories.filter(
+          (c) => !calcResult.summary.categoriesUsed.includes(c)
+        )
+      : [];
 
   // 納品予定日ベースのSTA番号（STAyyyymmdd-n）。手順書: 日付は納品予定日
   function defaultSta(planIndex: number): string {
@@ -101,6 +149,7 @@ export default function ProvisionalPlanClient() {
         body: JSON.stringify({
           productType,
           targetTotal,
+          resume,
           ...(productType === "WITH_PRESCRIPTION" ? { selectedCategories } : {}),
         }),
       });
@@ -147,6 +196,15 @@ export default function ProvisionalPlanClient() {
           items,
           shipmentDate: new Date(shipmentDate).toISOString(),
           logilessOrderCode: staNumber,
+          // 計算の終了位置（翌日の「前回の続き」用にDB保存される）
+          endPosition: lastDeliverable
+            ? {
+                categoryName: lastDeliverable.categoryName,
+                colorName: getColorName(lastDeliverable.name),
+                lastSku: lastDeliverable.sku,
+                deferredColor: calcResult?.summary.deferredColor ?? null,
+              }
+            : undefined,
         }),
       });
       const data = await res.json();
@@ -155,6 +213,15 @@ export default function ProvisionalPlanClient() {
         return;
       }
       setCreatedPlans((prev) => [...prev, planIndex]);
+      if (lastDeliverable) {
+        setStoredEndPosition({
+          categoryName: lastDeliverable.categoryName,
+          colorName: getColorName(lastDeliverable.name),
+          lastSku: lastDeliverable.sku,
+          deferredColor: calcResult?.summary.deferredColor ?? null,
+          updatedAt: new Date().toISOString(),
+        });
+      }
       alert(
         `✓ 納品プランを作成しました\n` +
           `STA: ${staNumber}\n` +
@@ -175,6 +242,25 @@ export default function ProvisionalPlanClient() {
           業務ルールに基づいて納品数を自動算出します
         </p>
       </div>
+
+      {/* 本日の出荷スケジュール案内 */}
+      {schedule ? (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-800 mb-4">
+          本日（{schedule.workDayLabel}）は
+          <span className="font-semibold">
+            {schedule.shipmentDayLabel}（{format(schedule.shipmentDate, "M/d")}
+            ）出荷分
+          </span>
+          の作成日です（{schedule.productTypeLabel}・{schedule.targetTotal}点）
+          {schedule.note && (
+            <p className="text-xs text-blue-600 mt-1">※{schedule.note}</p>
+          )}
+        </div>
+      ) : (
+        <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-500 mb-4">
+          本日はプラン作成日ではありません（プラン作成: 月〜木曜日）
+        </div>
+      )}
 
       {/* 設定パネル */}
       <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
@@ -278,6 +364,32 @@ export default function ProvisionalPlanClient() {
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
+
+          <div className="flex flex-col justify-end pb-2">
+            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={resume}
+                onChange={(e) => setResume(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              前回の続きから計算する（前回作成済みカラーの次から開始）
+            </label>
+            {storedEndPosition?.colorName && (
+              <p className="text-xs text-gray-400 mt-1">
+                前回の終了位置（
+                {format(new Date(storedEndPosition.updatedAt), "M/d")}）:{" "}
+                {storedEndPosition.categoryName} / {storedEndPosition.colorName}
+                {storedEndPosition.lastSku && (
+                  <span className="font-mono">
+                    （{storedEndPosition.lastSku} まで）
+                  </span>
+                )}
+                {storedEndPosition.deferredColor &&
+                  ` ・翌日回し: ${storedEndPosition.deferredColor}`}
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -305,6 +417,48 @@ export default function ProvisionalPlanClient() {
       {/* 計算結果 */}
       {calcResult && (
         <>
+          {/* 前回の続き・翌日回しの案内 */}
+          {calcResult.resumeInfo && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 text-xs text-blue-700 mb-3">
+              前回（{calcResult.resumeInfo.workDate}
+              {calcResult.resumeInfo.staNumber &&
+                ` / ${calcResult.resumeInfo.staNumber}`}
+              ）の続き:{" "}
+              <span className="font-semibold">
+                {calcResult.resumeInfo.afterColor}
+              </span>{" "}
+              の次のカラーから計算しています
+            </div>
+          )}
+          {calcResult.summary.deferredColor && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-xs text-amber-700 mb-3">
+              <span className="font-semibold">
+                {calcResult.summary.deferredColor}
+              </span>{" "}
+              は丸ごと追加すると上限（{calcResult.summary.maxTotal}
+              点）を超えるため今回は除外しました。次回のプラン作成はこのカラーから開始されます
+            </div>
+          )}
+
+          {/* 計算の終了位置 */}
+          {lastDeliverable && (
+            <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-gray-600 mb-3">
+              終了位置:{" "}
+              <span className="font-semibold text-gray-800">
+                {lastDeliverable.categoryName} /{" "}
+                {getColorName(lastDeliverable.name)}
+              </span>
+              <span className="font-mono ml-1">
+                （最後のSKU: {lastDeliverable.sku}）
+              </span>
+              {unreachedCategories.length > 0 && (
+                <span className="ml-2 text-gray-400">
+                  未到達カテゴリ: {unreachedCategories.join("、")}
+                </span>
+              )}
+            </div>
+          )}
+
           {/* サマリー */}
           <div className="grid grid-cols-4 gap-4 mb-4">
             {[

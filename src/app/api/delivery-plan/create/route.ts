@@ -18,6 +18,15 @@ const schema = z.object({
   items: z.array(itemSchema).min(1).max(300),
   shipmentDate: z.string(),              // ISO string
   logilessOrderCode: z.string().regex(/^STA\d{8}-\d+$/), // STAyyyymmdd-n
+  // 計算の終了位置（翌日の「前回の続き」判定に使う）。プラン登録時に上書き保存する
+  endPosition: z
+    .object({
+      categoryName: z.string().nullable(),
+      colorName: z.string().nullable(),
+      lastSku: z.string().nullable(),
+      deferredColor: z.string().nullable(),
+    })
+    .optional(),
 });
 
 /**
@@ -36,7 +45,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { items, shipmentDate, logilessOrderCode } = parsed.data;
+  const { items, shipmentDate, logilessOrderCode, endPosition } = parsed.data;
 
   // 重複チェック
   const existing = await db.deliveryPlan.findUnique({
@@ -112,6 +121,18 @@ export async function POST(req: NextRequest) {
       where: { id: plan.id },
       data: { status: "SUBMITTED" },
     });
+
+    // 計算の終了位置を保存（種別ごとに最新1件を上書き）。失敗してもプラン作成は成功扱い
+    if (endPosition) {
+      const planProductType = productMap.values().next().value!.productType;
+      await db.calculationEndPosition
+        .upsert({
+          where: { productType: planProductType },
+          update: endPosition,
+          create: { productType: planProductType, ...endPosition },
+        })
+        .catch((e) => console.warn("[delivery-plan/create] 終了位置の保存失敗:", e));
+    }
 
     // ── 3. Dropboxに納品プランCSVをアップロード ─────────
     // 失敗してもプラン作成は成功扱い（通知と同様にwarnのみ）

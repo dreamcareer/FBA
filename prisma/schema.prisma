@@ -145,6 +145,7 @@ enum SyncType {
   LOGILESS_INVENTORY
   FBA_INVENTORY // Phase 2
   SALES_DATA // Phase 2
+  BUSINESS_REPORT // DB側に既存の値（外部プロセスが使用）。削除しないこと
 }
 
 enum SyncStatus {
@@ -161,6 +162,20 @@ model InventoryCheckResult {
   data       String   @db.Text // JSON文字列で結果を保存
 
   @@map("inventory_check_results")
+}
+
+// ── 仮プラン計算の終了位置（種別ごとに最新1件） ──────────────
+model CalculationEndPosition {
+  id            String      @id @default(cuid()) @map("calculation_end_position_id")
+  productType   ProductType @unique @map("product_type")
+  categoryName  String?     @map("category_name") // 終了時のカテゴリ（シート）
+  colorName     String?     @map("color_name") // 最後に納品対象になったカラー
+  lastSku       String?     @map("last_sku") // 最後のSKU
+  deferredColor String?     @map("deferred_color") // 翌日回しになったカラー
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  @@map("calculation_end_positions")
 }
 
 // ── OAuthトークン ─────────────────────────────────────────
