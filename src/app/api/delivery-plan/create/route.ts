@@ -4,6 +4,8 @@ import { format } from "date-fns";
 import { db } from "@/lib/db";
 import { createSalesOrder } from "@/lib/logiless/client";
 import { notifyDeliveryPlanCreated } from "@/lib/notify";
+import { uploadFile } from "@/lib/dropbox/client";
+import { buildDeliveryPlanCsv } from "@/lib/delivery/csv";
 
 const itemSchema = z.object({
   productId: z.string(),
@@ -111,7 +113,17 @@ export async function POST(req: NextRequest) {
       data: { status: "SUBMITTED" },
     });
 
-    // ── 3. Discord通知 ──────────────────────────────────
+    // ── 3. Dropboxに納品プランCSVをアップロード ─────────
+    // 失敗してもプラン作成は成功扱い（通知と同様にwarnのみ）
+    if (process.env.DROPBOX_APP_KEY) {
+      const csv = buildDeliveryPlanCsv(logilessOrderCode, shipDate, plan.items);
+      const folder = process.env.DROPBOX_FOLDER_PATH ?? "/納品プラン";
+      await uploadFile(`${folder}/${logilessOrderCode}.csv`, csv).catch((e) =>
+        console.warn("[dropbox] CSVアップロード失敗:", e)
+      );
+    }
+
+    // ── 4. Discord通知 ──────────────────────────────────
     const totalQuantity = items.reduce((s, i) => s + i.quantity, 0);
     const firstProduct = productMap.values().next().value;
     const productType =
