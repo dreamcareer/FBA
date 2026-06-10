@@ -7,7 +7,9 @@
  *
  * 度あり（WITH_PRESCRIPTION）の追加ルール:
  *   - カラー（商品名から判定）単位でまとめる
- *   - 1プランは「3カラー・5SKU」まで（背景色3種・5行分まで）
+ *   - カラーはプランをまたいで分割しない（300点を超える単独カラーを除く）
+ *   - 同一カラーのみのプランはSKU数制限なし（300点の上限のみ）
+ *   - カラーが混在するプランは「3カラー・5SKU」まで（背景色3種・5行分まで）
  *
  * 度なし（WITHOUT_PRESCRIPTION）:
  *   - カラー制約なし。300点ごとに区切るだけ。
@@ -18,7 +20,7 @@ import { getColorName } from "@/lib/product-colors";
 
 export const MAX_UNITS_PER_PLAN = 300; // 1プランの最大納品数（点）
 export const MAX_COLORS_PER_PLAN = 3; // 度あり: 1プランの最大カラー数
-export const MAX_SKUS_PER_PLAN = 5; // 度あり: 1プランの最大SKU数
+export const MAX_SKUS_PER_PLAN = 5; // 度あり: カラー混在プランの最大SKU数（同一カラーのみなら制限なし）
 
 export interface DeliveryPlanGroup {
   items: DeliveryCalculationResult[];
@@ -65,44 +67,70 @@ function packByUnits(
   return plans;
 }
 
-/** 度あり: カラー単位でまとめ、3カラー5SKU・300点で区切る */
+/**
+ * 度あり: カラー単位で丸ごと詰める（カラーはプランをまたいで分割しない）。
+ *
+ * 各カラーは「丸ごと相乗りできる最初の既存プラン」に入れる（first-fit）。
+ * どのプランにも収まらないカラーは単独で新しいプランを作る。
+ * 入りきらなかったカラーの代わりに、後続の小さいカラーが前のプランの
+ * 空き枠を丸ごと埋めることができる。
+ *
+ * - 混在プランは3カラー・5SKU・300点まで
+ * - 単独カラーのプランはSKU数制限なし（300点を超える場合のみカラー内で分割）
+ */
 function packWithColors(
   results: DeliveryCalculationResult[],
   qtyOf: (r: DeliveryCalculationResult) => number
 ): DeliveryCalculationResult[][] {
-  // 同じカラーが連続するようカラー名でグルーピング（安定ソート）
-  const sorted = [...results].sort((a, b) =>
-    getColorName(a.name).localeCompare(getColorName(b.name), "ja")
-  );
-
-  const plans: DeliveryCalculationResult[][] = [];
-  let current: DeliveryCalculationResult[] = [];
-  let currentUnits = 0;
-  const currentColors = new Set<string>();
-
-  for (const r of sorted) {
+  // 出現順を保ってカラー単位にグルーピング（計算結果はカラー順に並んでいる）
+  const colorGroups = new Map<string, DeliveryCalculationResult[]>();
+  for (const r of results) {
     const color = getColorName(r.name);
-    const q = qtyOf(r);
-
-    const wouldColors = new Set(currentColors).add(color);
-    const fits =
-      current.length === 0 ||
-      (current.length < MAX_SKUS_PER_PLAN &&
-        wouldColors.size <= MAX_COLORS_PER_PLAN &&
-        currentUnits + q <= MAX_UNITS_PER_PLAN);
-
-    if (!fits) {
-      plans.push(current);
-      current = [];
-      currentUnits = 0;
-      currentColors.clear();
-    }
-    current.push(r);
-    currentUnits += q;
-    currentColors.add(color);
+    const list = colorGroups.get(color);
+    if (list) list.push(r);
+    else colorGroups.set(color, [r]);
   }
-  if (current.length > 0) plans.push(current);
-  return plans;
+
+  interface OpenPlan {
+    items: DeliveryCalculationResult[];
+    units: number;
+    colors: Set<string>;
+  }
+  const plans: OpenPlan[] = [];
+
+  for (const [color, group] of colorGroups) {
+    const groupUnits = group.reduce((s, r) => s + qtyOf(r), 0);
+
+    // カラーを丸ごと相乗りできる最初のプランを探す（混在は3カラー・5SKU・300点まで）
+    const host = plans.find(
+      (p) =>
+        p.items.length + group.length <= MAX_SKUS_PER_PLAN &&
+        new Set(p.colors).add(color).size <= MAX_COLORS_PER_PLAN &&
+        p.units + groupUnits <= MAX_UNITS_PER_PLAN
+    );
+    if (host) {
+      host.items.push(...group);
+      host.units += groupUnits;
+      host.colors.add(color);
+      continue;
+    }
+
+    // どこにも相乗りできなければ、このカラー単独で新しいプランを作る。
+    // 単独カラーはSKU数制限なし。300点を超える場合のみカラー内で分割する
+    let current: OpenPlan = { items: [], units: 0, colors: new Set([color]) };
+    plans.push(current);
+    for (const r of group) {
+      const q = qtyOf(r);
+      if (current.items.length > 0 && current.units + q > MAX_UNITS_PER_PLAN) {
+        current = { items: [], units: 0, colors: new Set([color]) };
+        plans.push(current);
+      }
+      current.items.push(r);
+      current.units += q;
+    }
+  }
+
+  return plans.map((p) => p.items);
 }
 
 /**

@@ -44,6 +44,7 @@ export type SkipReason =
   | "UPPER_LIMIT_REACHED"     // FBA上限到達
   | "NO_SALES_DATA"           // 3ヶ月売上データなし
   | "FBA_LIMIT_NOT_SET"       // FBA上限未設定（CSV未取込）
+  | "TARGET_EXCEEDED"         // カラー丸ごと追加で許容上限超過 → 翌日回し
 
 export interface CalculationSummary {
   results: DeliveryCalculationResult[];
@@ -51,4 +52,7 @@ export interface CalculationSummary {
   deliverableCount: number;
   skippedCount: number;
   categoriesUsed: string[];
+  maxTotal: number;                  // 目標 + 超過許容点数（このカラーまでで超えるなら翌日回し）
+  deferredColor: string | null;      // 許容上限超過で翌日回しになったカラー
+  resumedAfterColor: string | null;  // 前回作成済みカラーの続きから計算した場合、その最後のカラー
 }
