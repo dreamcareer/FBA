@@ -25,9 +25,13 @@
 - レスポンスにロット番号、使用期限、ロケーション、数量が含まれる
 
 ### 受注登録（納品プラン）
-- `POST /api/v1/merchant/{id}/sales_orders`
-- 受注コード: `STAyyyymmdd-n` 形式
-- 明細行に商品コード・数量を含める
+- `POST /api/v1/merchant/{id}/sales_orders/new`（`/sales_orders` へのPOSTは405）
+- ボディは `{ "sales_order": {...} }` でラップする
+- 必須: `code`, `buyer_name1`, `recipient_name1`, `recipient_address1`, `payment_method`, `delivery_method`, `store`(店舗ID), `lines`
+- 受注コード(`code`): `STAyyyymmdd-n` 形式
+- 明細行(`lines[].article_code`)は**商品コード（店舗）= 商品対応表の出品コード**。
+  商品マスタのJANを `GET /article_maps?article_code={JAN}&store={店舗ID}` で `mapped_code` に変換して使う
+- 店舗一覧は `GET /api/v1/merchant/{id}/stores` で確認（本番: 4847 = ナチュラリAmazon店(手動)）
 
 ## エラーハンドリング
 
