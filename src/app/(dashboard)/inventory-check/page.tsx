@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { getColorName } from "@/lib/product-colors";
 import { sortCategories, type CheckResult, type ShortageItem } from "@/lib/inventory-check";
+import { UNSELLABLE_LOCATION_LABEL } from "@/lib/logiless/locations";
 import ColorGroup from "./_components/ColorGroup";
 
 export default function InventoryCheckPage() {
@@ -51,7 +52,7 @@ export default function InventoryCheckPage() {
         <div>
           <h1 className="text-lg font-semibold text-gray-900">在庫洗い出し</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            ロジレス在庫が閾値を下回っている商品の一覧
+            ロジレス在庫が閾値を下回っている商品の一覧（{UNSELLABLE_LOCATION_LABEL}は在庫数に含めません）
           </p>
         </div>
         <button

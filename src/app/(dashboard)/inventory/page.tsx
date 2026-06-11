@@ -3,11 +3,41 @@ import { db } from "@/lib/db";
 import { addMonths } from "date-fns";
 import { SyncStatus, SyncType } from "@prisma/client";
 import { getColorName } from "@/lib/product-colors";
+import {
+  excludeUnsellableLocations,
+  UNSELLABLE_LOCATION_LABEL,
+} from "@/lib/logiless/locations";
 import SyncButton from "./_components/SyncButton";
 import SearchInput from "./_components/SearchInput";
 import ColorGroup from "./_components/ColorGroup";
 
 const EXPIRY_WARN_MONTHS = 18;
+
+/** テーブルヘッダ用: hover即時表示のツールチップ付きラベル（title属性は表示が遅いため不使用） */
+function HeaderHint({ label, hint }: { label: string; hint: string }) {
+  return (
+    <span className="group relative cursor-help inline-flex items-center gap-1">
+      {label}
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        fill="none"
+        viewBox="0 0 24 24"
+        strokeWidth={2}
+        stroke="currentColor"
+        className="h-3.5 w-3.5 text-gray-400"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"
+        />
+      </svg>
+      <span className="pointer-events-none absolute right-0 top-full mt-1.5 z-10 hidden group-hover:block whitespace-nowrap rounded-md bg-gray-900 px-2.5 py-1.5 text-[11px] font-normal text-white shadow-lg">
+        {hint}
+      </span>
+    </span>
+  );
+}
 
 export default async function InventoryPage({
   searchParams,
@@ -72,7 +102,8 @@ export default async function InventoryPage({
     db.product.findMany({
       where,
       include: {
-        logilessInventories: true,
+        // 不具合品・返送品ロケーションは表示対象外
+        logilessInventories: { where: excludeUnsellableLocations },
       },
       orderBy: { sku: "asc" },
       skip: (page - 1) * perPage,
@@ -324,10 +355,20 @@ export default async function InventoryPage({
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">FBA上限</th>
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">FBA在庫</th>
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">入荷予定</th>
-              <th className="text-right px-3 py-2 font-medium whitespace-nowrap">ロジレス在庫</th>
+              <th className="text-right px-3 py-2 font-medium whitespace-nowrap">
+                <HeaderHint
+                  label="ロジレス在庫"
+                  hint={`${UNSELLABLE_LOCATION_LABEL}は含まれません`}
+                />
+              </th>
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">3ヶ月売上</th>
               <th className="text-left px-3 py-2 font-medium whitespace-nowrap">ロケーション</th>
-              <th className="text-left px-3 py-2 font-medium whitespace-nowrap">出荷期限 <span className="font-normal text-gray-400">(18ヶ月以内⚠)</span></th>
+              <th className="text-left px-3 py-2 font-medium whitespace-nowrap">
+                <HeaderHint
+                  label="出荷期限"
+                  hint="期限が18ヶ月以内のロットは⚠で表示されます"
+                />
+              </th>
             </tr>
           </thead>
           <tbody>

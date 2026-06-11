@@ -7,6 +7,7 @@ import {
   type ShortageItem,
   type CheckResult,
 } from "@/lib/inventory-check";
+import { excludeUnsellableLocations } from "@/lib/logiless/locations";
 
 /**
  * POST /api/inventory-check
@@ -31,7 +32,8 @@ export async function POST(req: NextRequest) {
   const products = await db.product.findMany({
     where: { isActive: true },
     include: {
-      logilessInventories: true,
+      // 不具合品・返送品ロケーションは在庫合計に含めない
+      logilessInventories: { where: excludeUnsellableLocations },
       category: true,
     },
     orderBy: { sku: "asc" },

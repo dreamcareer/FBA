@@ -74,32 +74,60 @@ export interface LogilessLogicalInventory {
   received: number;
 }
 
-// POST /sales_orders リクエスト
+// POST /sales_orders/new リクエスト（ボディは { sales_order: {...} } でラップして送る）
 export interface LogilessSalesOrderRequest {
-  order_no: string;
-  order_date: string;
-  shipping_date: string;
-  store_name: string;
-  items: LogilessSalesOrderItem[];
+  code: string;                      // 受注コード（STAyyyymmdd-n）
+  buyer_name1: string;
+  buyer_post_code?: string;
+  buyer_prefecture?: string;
+  buyer_address1?: string;
+  buyer_address2?: string;
+  buyer_address3?: string;
+  buyer_phone?: string;
+  recipient_name1: string;
+  recipient_post_code?: string;
+  recipient_prefecture?: string;
+  recipient_address1: string;
+  recipient_address2?: string;
+  recipient_address3?: string;
+  recipient_phone?: string;
+  payment_method: string;            // 例: no_payment
+  delivery_method: string;           // 例: yamato
+  ordered_at?: string;               // Y-m-d H:i:s
+  scheduled_shipping_date?: string;  // Y-m-d
+  picking_notes?: string;            // 出荷指示書特記事項
+  store: number;                     // 店舗ID
+  warehouse?: number;
+  lines: LogilessSalesOrderLine[];
 }
 
-export interface LogilessSalesOrderItem {
-  article_code: string;
+export interface LogilessSalesOrderLine {
+  article_code: string;              // 商品コード（店舗）= 商品対応表の mapped_code
+  article_name: string;
   quantity: number;
-  expiration_date?: string;
+  price?: number;
+  deadline?: string;                 // 使用期限 Y-m-d
   lot_number?: string;
 }
 
-// POST /sales_orders レスポンス
+// 受注伝票レスポンス（GET一覧の要素 / POST /sales_orders/new の201レスポンス）
 export interface LogilessSalesOrderResponse {
   id: number;
-  order_no: string;
-  status: string;
-  items: {
+  code: string;
+  document_status: string;
+  lines: {
     id: number;
     article_code: string;
     quantity: number;
   }[];
+}
+
+// GET /article_maps レスポンスアイテム（商品対応表: 店舗の出品コード→商品マスタ）
+export interface LogilessArticleMap {
+  id: number;
+  mapped_code: string;
+  article: { id: number; code: string; identification_code: string | null } | null;
+  store: { id: number; name: string } | null;
 }
 
 // ページネーション付き汎用レスポンス

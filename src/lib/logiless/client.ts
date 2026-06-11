@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import type {
   LogilessArticle,
   LogilessArticleDetail,
+  LogilessArticleMap,
   LogilessActualInventory,
   LogilessLogicalInventory,
   LogilessPagedResponse,
@@ -258,14 +259,35 @@ export async function fetchActualInventories(
 
 /**
  * FBA出荷指示をロジレスに受注登録する
+ * エンドポイントは POST /sales_orders/new（/sales_orders へのPOSTは405になる）
+ * ボディは { sales_order: {...} } でラップする仕様
  */
 export async function createSalesOrder(
   orderData: LogilessSalesOrderRequest
 ): Promise<LogilessSalesOrderResponse> {
-  return request<LogilessSalesOrderResponse>("/sales_orders", {
+  return request<LogilessSalesOrderResponse>("/sales_orders/new", {
     method: "POST",
-    body: JSON.stringify(orderData),
+    body: JSON.stringify({ sales_order: orderData }),
   });
+}
+
+/**
+ * 商品対応表から店舗の出品コード（mapped_code）を取得する
+ * 受注明細の article_code は「商品コード（店舗）」のため、
+ * 商品マスタのcode（JAN）をそのまま使えず、商品対応表で変換が必要
+ *
+ * @param articleCode 商品マスタのcode（JAN）
+ * @param storeId 店舗ID
+ * @returns mapped_code（対応表に存在しない場合は null）
+ */
+export async function fetchMappedCode(
+  articleCode: string,
+  storeId: number
+): Promise<string | null> {
+  const res = await request<LogilessPagedResponse<LogilessArticleMap>>(
+    `/article_maps?article_code=${encodeURIComponent(articleCode)}&store=${storeId}&limit=1`
+  );
+  return res.data[0]?.mapped_code ?? null;
 }
 
 /**
@@ -290,7 +312,7 @@ export async function getSalesOrder(
 ): Promise<LogilessSalesOrderResponse | null> {
   try {
     const res = await request<LogilessPagedResponse<LogilessSalesOrderResponse>>(
-      `/sales_orders?order_no=${encodeURIComponent(orderNo)}`
+      `/sales_orders?code=${encodeURIComponent(orderNo)}`
     );
     return res.data[0] ?? null;
   } catch {
