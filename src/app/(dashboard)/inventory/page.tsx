@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { addMonths } from "date-fns";
@@ -52,28 +53,44 @@ export default async function InventoryPage({
   const page = Number(params.page ?? 1);
   const perPage = 50;
 
-  // カテゴリ一覧を取得（タブ表示用・表示順固定）
-  const CATEGORY_ORDER = [
-    "1day10P", "1day30P", "高含水等", "Pixie",
-    "ハイドロゲル", "UVチャーミング", "UVピュア", "1m2p",
-    "色なしコンタクト", "Charm10P", "Charm30P",
+  // カテゴリ一覧を取得（タブ表示用）
+  // 並び順はスプレッドシートのタブ順に合わせる
+  const CATEGORY_GROUPS: string[][] = [
+    [
+      "1day10P",
+      "1day30P",
+      "高含水等",
+      "Pixie",
+      "ハイドロゲル",
+      "UVチャーミング",
+      "UVピュア",
+      "1m2p",
+      "色なしコンタクト",
+      "Charm10P",
+      "Charm30P",
+    ],
   ];
+  const CATEGORY_ORDER = CATEGORY_GROUPS.flat();
   const HIDDEN_CATEGORIES = ["その他"];
   const allCategories = await db.productCategory.findMany({
     select: { id: true, name: true },
   });
-  const categories = allCategories
-    .filter((c) => !HIDDEN_CATEGORIES.includes(c.name))
-    .sort((a, b) => {
-      const ai = CATEGORY_ORDER.indexOf(a.name);
-      const bi = CATEGORY_ORDER.indexOf(b.name);
-      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-    });
+  const visibleCategories = allCategories.filter(
+    (c) => !HIDDEN_CATEGORIES.includes(c.name)
+  );
+  const categoryByName = new Map(visibleCategories.map((c) => [c.name, c]));
+  // どのグループにも属さない新規カテゴリは末尾グループにまとめて取りこぼさない
+  const ungrouped = visibleCategories
+    .filter((c) => !CATEGORY_ORDER.includes(c.name))
+    .map((c) => c.name);
+  const renderGroups = ungrouped.length
+    ? [...CATEGORY_GROUPS, ungrouped]
+    : CATEGORY_GROUPS;
 
   // 「度なし」は商品種別でフィルター、それ以外はカテゴリでフィルター
   const isDoNashi = categoryFilter === "度なし";
   const selectedCategory = !isDoNashi && categoryFilter
-    ? categories.find((c) => c.name === categoryFilter)
+    ? categoryByName.get(categoryFilter)
     : undefined;
 
   const where = {
@@ -259,8 +276,12 @@ export default async function InventoryPage({
             const inactiveCount = "text-gray-400";
 
             const isAll = !categoryFilter;
+            const Divider = () => (
+              <span className="h-5 w-px bg-gray-200 mx-1 self-center" aria-hidden="true" />
+            );
             return (
               <>
+                {/* 概要フィルタ（すべて / 度なし）*/}
                 <a
                   href={buildHref({ cat: "", page: 1 })}
                   className={`${baseChip} ${isAll ? activeChip : inactiveChip}`}
@@ -283,20 +304,33 @@ export default async function InventoryPage({
                     {doNashiCount.toLocaleString()}
                   </span>
                 </a>
-                {categories.map((cat) => {
-                  const isActive = categoryFilter === cat.name;
-                  const count = categoryCountMap.get(cat.id) ?? 0;
+
+                {/* カテゴリ（軸ごとにグループ化・区切り線で分離）*/}
+                {renderGroups.map((group, gi) => {
+                  const chips = group
+                    .map((name) => categoryByName.get(name))
+                    .filter((c): c is { id: string; name: string } => Boolean(c));
+                  if (chips.length === 0) return null;
                   return (
-                    <a
-                      key={cat.id}
-                      href={buildHref({ cat: isActive ? "" : cat.name, page: 1 })}
-                      className={`${baseChip} ${isActive ? activeChip : inactiveChip}`}
-                    >
-                      <span>{cat.name}</span>
-                      <span className={`text-[10px] ${isActive ? activeCount : inactiveCount}`}>
-                        {count.toLocaleString()}
-                      </span>
-                    </a>
+                    <Fragment key={gi}>
+                      <Divider />
+                      {chips.map((cat) => {
+                        const isActive = categoryFilter === cat.name;
+                        const count = categoryCountMap.get(cat.id) ?? 0;
+                        return (
+                          <a
+                            key={cat.id}
+                            href={buildHref({ cat: isActive ? "" : cat.name, page: 1 })}
+                            className={`${baseChip} ${isActive ? activeChip : inactiveChip}`}
+                          >
+                            <span>{cat.name}</span>
+                            <span className={`text-[10px] ${isActive ? activeCount : inactiveCount}`}>
+                              {count.toLocaleString()}
+                            </span>
+                          </a>
+                        );
+                      })}
+                    </Fragment>
                   );
                 })}
               </>
@@ -400,10 +434,15 @@ export default async function InventoryPage({
                   })),
                 });
               });
-              return [...groups.entries()].map(([colorName, items]) => (
+              return [...groups.entries()].map(([colorName, items]) => {
+                // 同色グループ内で親ASIN（バリエーション親）を持つ商品から代表値を採用
+                const parentAsin =
+                  items.find((it) => it.product.parentAsin)?.product.parentAsin ?? null;
+                return (
                 <ColorGroup
                   key={colorName}
                   colorName={colorName}
+                  parentAsin={parentAsin}
                   items={items.map((item) => ({
                     product: {
                       id: item.product.id,
@@ -424,7 +463,8 @@ export default async function InventoryPage({
                   }))}
                   minExpiry={minExpiry.toISOString()}
                 />
-              ));
+                );
+              });
             })()}
           </tbody>
         </table>

@@ -51,6 +51,15 @@ async function runSalesSync(emit: EmitFn): Promise<SalesSyncResult> {
     const units3m = new Map(sales3m.map((s) => [s.sku, s.units]));
     const units1y = new Map(sales1y.map((s) => [s.sku, s.units]));
 
+    // 親ASIN（バリエーション親）を sku→parentAsin で集約。
+    // 1年レポート優先・3ヶ月で補完。親ASINは安定値なので最初に見つかった値を採用。
+    const parentAsinBySku = new Map<string, string>();
+    for (const s of [...sales1y, ...sales3m]) {
+      if (s.parentAsin && !parentAsinBySku.has(s.sku)) {
+        parentAsinBySku.set(s.sku, s.parentAsin);
+      }
+    }
+
     const products = await db.product.findMany({
       where: { isActive: true },
       select: { id: true, sku: true },
@@ -75,6 +84,10 @@ async function runSalesSync(emit: EmitFn): Promise<SalesSyncResult> {
           business3m: units3m.get(p.sku) ?? 0,
           business1y: units1y.get(p.sku) ?? 0,
           salesDataSyncedAt: syncedAt,
+          // 親ASINはレポートに出たSKUのみ更新（出ないSKUは既存値を保持）
+          ...(parentAsinBySku.has(p.sku)
+            ? { parentAsin: parentAsinBySku.get(p.sku)! }
+            : {}),
         },
       })
     );

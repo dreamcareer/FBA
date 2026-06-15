@@ -27,6 +27,7 @@ model Product {
   sku                 String      @unique // Amazon SKU (ロジレスのattr4、なければidentification_code)
   name                String      @map("product_name") // ロジレス由来
   asin                String? // SP-APIから同期
+  parentAsin          String?     @map("parent_asin") // SP-API売上レポートの親ASIN（バリエーション親）
   logilessProductCode String?     @map("logiless_product_code") // ロジレスのcode (= JAN) ← ロジレス在庫突合キー
   logilessArticleId   Int?        @unique @map("logiless_article_id")
   productType         ProductType @map("product_type")

@@ -35,16 +35,24 @@ type ProductWithLots = {
 
 type Props = {
   colorName: string;
+  parentAsin: string | null;
   items: ProductWithLots[];
   minExpiry: string;
 };
 
-export default function ColorGroup({ colorName, items, minExpiry }: Props) {
+export default function ColorGroup({ colorName, parentAsin, items, minExpiry }: Props) {
   const [open, setOpen] = useState(true);
   const bgColor = getProductColor(items[0]?.product.name ?? "") ?? "#f9f9f9";
   const totalStock = items.reduce(
     (s, item) => s + item.lots.reduce((ls, l) => ls + l.quantity, 0), 0
   );
+  // 同グループのSKUプレフィックス（末尾の度数を除いた共通部分）で
+  // セラーセントラルの在庫管理を絞り込み表示する
+  const skuPrefix = (items[0]?.product.sku ?? "").replace(/\d+$/, "");
+  const sellerCentralUrl =
+    "https://sellercentral.amazon.co.jp/myinventory/inventory" +
+    "?fulfilledBy=all&page=1&pageSize=250&sort=date_created_desc&status=all" +
+    `&searchString=${encodeURIComponent(skuPrefix)}`;
 
   return (
     <>
@@ -60,6 +68,32 @@ export default function ColorGroup({ colorName, items, minExpiry }: Props) {
             </span>
             {colorName}
             <span className="text-gray-400 font-normal">({items.length})</span>
+            {parentAsin && (
+              <a
+                href={sellerCentralUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                title={`セラーセントラルの在庫管理を開く（SKU: ${skuPrefix} で検索）`}
+                className="ml-1 inline-flex items-center gap-0.5 text-[10px] font-normal text-blue-600 hover:underline"
+              >
+                (親)ASIN: {parentAsin}
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                  stroke="currentColor"
+                  className="h-2.5 w-2.5"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+                  />
+                </svg>
+              </a>
+            )}
           </span>
         </td>
         <td className="px-3 py-1 text-right tabular-nums font-semibold text-gray-700">
