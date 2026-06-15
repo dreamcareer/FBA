@@ -450,18 +450,29 @@ async function downloadReportDocument(documentId: string): Promise<string> {
 }
 
 /** unitsOrdered を SKU 単位で集約する */
-function aggregateSalesBySku(text: string): { sku: string; units: number }[] {
+function aggregateSalesBySku(
+  text: string
+): { sku: string; units: number; parentAsin: string | null }[] {
   const report = JSON.parse(text) as SalesTrafficReport;
   const rows = report.salesAndTrafficByAsin ?? [];
 
   const bySku = new Map<string, number>();
+  const parentBySku = new Map<string, string>();
   for (const r of rows) {
     if (!r.sku) continue; // asinGranularity=SKU のときのみ sku が入る
     const units = r.salesByAsin?.unitsOrdered ?? 0;
     bySku.set(r.sku, (bySku.get(r.sku) ?? 0) + units);
+    // 親ASINは日次行で重複するため最初に見つかった値を採用
+    if (r.parentAsin && !parentBySku.has(r.sku)) {
+      parentBySku.set(r.sku, r.parentAsin);
+    }
   }
 
-  return [...bySku.entries()].map(([sku, units]) => ({ sku, units }));
+  return [...bySku.entries()].map(([sku, units]) => ({
+    sku,
+    units,
+    parentAsin: parentBySku.get(sku) ?? null,
+  }));
 }
 
 /**
@@ -471,7 +482,7 @@ function aggregateSalesBySku(text: string): { sku: string; units: number }[] {
 export async function fetchSalesReportResult(
   reportId: string,
   onProgress?: (message: string) => void
-): Promise<{ sku: string; units: number }[]> {
+): Promise<{ sku: string; units: number; parentAsin: string | null }[]> {
   const documentId = await waitForReportDocument(reportId, onProgress);
   onProgress?.("ダウンロード中");
   const text = await downloadReportDocument(documentId);
@@ -486,7 +497,7 @@ export async function fetchSalesData(
   startDate: string,
   endDate: string,
   onProgress?: (message: string) => void
-): Promise<{ sku: string; units: number }[]> {
+): Promise<{ sku: string; units: number; parentAsin: string | null }[]> {
   onProgress?.("レポート作成をリクエスト中");
   const reportId = await requestSalesReport(startDate, endDate);
   return fetchSalesReportResult(reportId, onProgress);
