@@ -7,6 +7,7 @@
  * - 期限5分前を切ったら自動リフレッシュ、401 を踏んだら1回だけ強制リフレッシュ
  */
 
+import { gunzipSync } from "zlib";
 import { db } from "@/lib/db";
 
 const LWA_TOKEN_URL = "https://api.amazon.com/auth/o2/token";
@@ -329,9 +330,164 @@ export async function getFnskuLabels(
   throw new NotImplementedError("getFnskuLabels");
 }
 
-export async function fetchSalesData(
-  _startDate: string,
-  _endDate: string
+// ── 売上（Sales & Traffic ビジネスレポート） ──────────────────
+//
+// 売上数量は Amazon の「売上・トラフィック ビジネスレポート」
+// (GET_SALES_AND_TRAFFIC_REPORT) を SKU 粒度で取得し、
+// salesByAsin.unitsOrdered（注文された数量）を販売数量として使う。
+//
+// レポートは createReport → getReport(生成待ち) → getReportDocument
+// → ダウンロード(GZIP) → JSON パース、という非同期フロー。
+
+const REPORTS_BASE = "/reports/2021-06-30";
+const SALES_TRAFFIC_REPORT_TYPE = "GET_SALES_AND_TRAFFIC_REPORT";
+
+const REPORT_POLL_INTERVAL_MS = 5000;
+const REPORT_MAX_WAIT_MS = 4 * 60 * 1000; // レポート生成の最大待ち時間（4分）
+
+interface CreateReportResponse {
+  reportId: string;
+}
+
+interface GetReportResponse {
+  processingStatus: "IN_QUEUE" | "IN_PROGRESS" | "DONE" | "FATAL" | "CANCELLED";
+  reportDocumentId?: string;
+}
+
+interface GetReportDocumentResponse {
+  reportDocumentId: string;
+  url: string;
+  compressionAlgorithm?: "GZIP";
+}
+
+interface SalesTrafficReport {
+  salesAndTrafficByAsin?: {
+    parentAsin?: string;
+    childAsin?: string;
+    sku?: string;
+    salesByAsin?: { unitsOrdered?: number };
+  }[];
+}
+
+/**
+ * 売上レポートの生成をリクエストし reportId を返す。
+ * （生成自体は Amazon 側で非同期に進む。complete を待つには
+ *   fetchSalesReportResult を使う）
+ */
+export async function requestSalesReport(
+  startDate: string,
+  endDate: string
+): Promise<string> {
+  const marketplaceId = process.env.SP_API_MARKETPLACE_ID;
+  if (!marketplaceId) {
+    throw new Error("SP-API: SP_API_MARKETPLACE_ID が設定されていません");
+  }
+
+  const res = await request<CreateReportResponse>(`${REPORTS_BASE}/reports`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      reportType: SALES_TRAFFIC_REPORT_TYPE,
+      marketplaceIds: [marketplaceId],
+      dataStartTime: startDate,
+      dataEndTime: endDate,
+      reportOptions: { dateGranularity: "DAY", asinGranularity: "SKU" },
+    }),
+  });
+
+  return res.reportId;
+}
+
+/** レポートが DONE になるまでポーリングし、reportDocumentId を返す */
+async function waitForReportDocument(
+  reportId: string,
+  onProgress?: (message: string) => void
+): Promise<string> {
+  const startedAt = Date.now();
+
+  for (;;) {
+    const res = await request<GetReportResponse>(
+      `${REPORTS_BASE}/reports/${reportId}`
+    );
+
+    if (res.processingStatus === "DONE") {
+      if (!res.reportDocumentId) {
+        throw new Error("SP-API: レポートは完了しましたが documentId がありません");
+      }
+      return res.reportDocumentId;
+    }
+
+    if (res.processingStatus === "FATAL" || res.processingStatus === "CANCELLED") {
+      throw new Error(`SP-API: レポート生成に失敗しました (${res.processingStatus})`);
+    }
+
+    const elapsedSec = Math.floor((Date.now() - startedAt) / 1000);
+    if (Date.now() - startedAt > REPORT_MAX_WAIT_MS) {
+      throw new Error("SP-API: レポート生成がタイムアウトしました（4分）");
+    }
+
+    onProgress?.(`生成中… (${res.processingStatus} / ${elapsedSec}秒経過)`);
+    await sleep(REPORT_POLL_INTERVAL_MS);
+  }
+}
+
+/** reportDocument をダウンロード・解凍して本文テキストを返す */
+async function downloadReportDocument(documentId: string): Promise<string> {
+  const doc = await request<GetReportDocumentResponse>(
+    `${REPORTS_BASE}/documents/${documentId}`
+  );
+
+  // url は署名付き S3 URL。SP-API トークンは付けずにそのまま取得する。
+  const res = await fetch(doc.url);
+  if (!res.ok) {
+    throw new Error(`SP-API: レポートのダウンロードに失敗しました (${res.status})`);
+  }
+
+  const buf = Buffer.from(await res.arrayBuffer());
+  return doc.compressionAlgorithm === "GZIP"
+    ? gunzipSync(buf).toString("utf-8")
+    : buf.toString("utf-8");
+}
+
+/** unitsOrdered を SKU 単位で集約する */
+function aggregateSalesBySku(text: string): { sku: string; units: number }[] {
+  const report = JSON.parse(text) as SalesTrafficReport;
+  const rows = report.salesAndTrafficByAsin ?? [];
+
+  const bySku = new Map<string, number>();
+  for (const r of rows) {
+    if (!r.sku) continue; // asinGranularity=SKU のときのみ sku が入る
+    const units = r.salesByAsin?.unitsOrdered ?? 0;
+    bySku.set(r.sku, (bySku.get(r.sku) ?? 0) + units);
+  }
+
+  return [...bySku.entries()].map(([sku, units]) => ({ sku, units }));
+}
+
+/**
+ * 生成済み（または生成中）の reportId について、完了を待ってから
+ * ダウンロード・パースし、SKU 別の販売数量を返す。
+ */
+export async function fetchSalesReportResult(
+  reportId: string,
+  onProgress?: (message: string) => void
 ): Promise<{ sku: string; units: number }[]> {
-  throw new NotImplementedError("fetchSalesData");
+  const documentId = await waitForReportDocument(reportId, onProgress);
+  onProgress?.("ダウンロード中");
+  const text = await downloadReportDocument(documentId);
+  return aggregateSalesBySku(text);
+}
+
+/**
+ * 指定期間の SKU 別販売数量（unitsOrdered）を取得する。
+ * createReport → 生成待ち → ダウンロード → 集約までを一括で行う。
+ */
+export async function fetchSalesData(
+  startDate: string,
+  endDate: string,
+  onProgress?: (message: string) => void
+): Promise<{ sku: string; units: number }[]> {
+  onProgress?.("レポート作成をリクエスト中");
+  const reportId = await requestSalesReport(startDate, endDate);
+  return fetchSalesReportResult(reportId, onProgress);
 }

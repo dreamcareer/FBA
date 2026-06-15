@@ -16,6 +16,7 @@ type Product = {
   id: string;
   sku: string;
   asin: string | null;
+  jan: string | null;
   name: string;
   productType: string;
   fbaStockQuantity: number;
@@ -23,6 +24,8 @@ type Product = {
   fbaLimitNote: string | null;
   fbaOpenPoQuantity: number | null;
   business3m: number | null;
+  business1y: number | null;
+  stockUpperLimit: number | null;
 };
 
 type ProductWithLots = {
@@ -62,7 +65,7 @@ export default function ColorGroup({ colorName, items, minExpiry }: Props) {
         <td className="px-3 py-1 text-right tabular-nums font-semibold text-gray-700">
           {totalStock.toLocaleString()}
         </td>
-        <td colSpan={3} />
+        <td colSpan={5} />
       </tr>
       {open && items.map((item, idx) => (
         <InventoryRow

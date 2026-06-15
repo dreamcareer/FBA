@@ -10,6 +10,8 @@ import {
 import SyncButton from "./_components/SyncButton";
 import SearchInput from "./_components/SearchInput";
 import ColorGroup from "./_components/ColorGroup";
+import { SkuColumnProvider } from "./_components/SkuColumnContext";
+import SkuHeaderToggle from "./_components/SkuHeaderToggle";
 
 const EXPIRY_WARN_MONTHS = 18;
 
@@ -95,6 +97,7 @@ export default async function InventoryPage({
     total,
     lastFbaSyncLog,
     lastLogilessSyncLog,
+    lastSalesSyncLog,
     allActiveCount,
     doNashiCount,
     categoryCountsRaw,
@@ -117,6 +120,11 @@ export default async function InventoryPage({
     }),
     db.syncLog.findFirst({
       where: { type: SyncType.LOGILESS_INVENTORY, status: SyncStatus.SUCCESS },
+      orderBy: { finishedAt: "desc" },
+      select: { finishedAt: true },
+    }),
+    db.syncLog.findFirst({
+      where: { type: SyncType.SALES_DATA, status: SyncStatus.SUCCESS },
       orderBy: { finishedAt: "desc" },
       select: { finishedAt: true },
     }),
@@ -163,10 +171,10 @@ export default async function InventoryPage({
             全 {total} SKU
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-start gap-2">
           <Link
             href="/inventory/fba-limits"
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 whitespace-nowrap"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 whitespace-nowrap"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -187,6 +195,7 @@ export default async function InventoryPage({
           <SyncButton
             lastFbaSyncAt={lastFbaSyncLog?.finishedAt?.toISOString() ?? null}
             lastLogilessSyncAt={lastLogilessSyncLog?.finishedAt?.toISOString() ?? null}
+            lastSalesSyncAt={lastSalesSyncLog?.finishedAt?.toISOString() ?? null}
           />
         </div>
       </div>
@@ -345,11 +354,12 @@ export default async function InventoryPage({
       </div>
 
       {/* テーブル */}
+      <SkuColumnProvider>
       <div className="rounded-lg border border-gray-200 overflow-auto">
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-gray-700 text-white">
-              <th className="text-left px-3 py-2 font-medium whitespace-nowrap">SKU<br /><span className="font-normal text-gray-400">ASIN</span></th>
+              <th className="text-left px-3 py-2 font-medium whitespace-nowrap align-top"><SkuHeaderToggle /></th>
               <th className="text-left px-3 py-2 font-medium whitespace-nowrap">商品名</th>
               <th className="text-center px-3 py-2 font-medium whitespace-nowrap">種別</th>
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">FBA上限</th>
@@ -362,6 +372,7 @@ export default async function InventoryPage({
                 />
               </th>
               <th className="text-right px-3 py-2 font-medium whitespace-nowrap">3ヶ月売上</th>
+              <th className="text-right px-3 py-2 font-medium whitespace-nowrap">1年売上</th>
               <th className="text-left px-3 py-2 font-medium whitespace-nowrap">ロケーション</th>
               <th className="text-left px-3 py-2 font-medium whitespace-nowrap">
                 <HeaderHint
@@ -369,6 +380,7 @@ export default async function InventoryPage({
                   hint="期限が18ヶ月以内のロットは⚠で表示されます"
                 />
               </th>
+              <th className="text-right px-3 py-2 font-medium whitespace-nowrap">在庫上限</th>
             </tr>
           </thead>
           <tbody>
@@ -397,6 +409,7 @@ export default async function InventoryPage({
                       id: item.product.id,
                       sku: item.product.sku,
                       asin: item.product.asin,
+                      jan: item.product.logilessProductCode,
                       name: item.product.name,
                       productType: item.product.productType,
                       fbaStockQuantity: item.product.fbaStockQuantity,
@@ -404,6 +417,8 @@ export default async function InventoryPage({
                       fbaLimitNote: item.product.fbaLimitNote,
                       fbaOpenPoQuantity: item.product.fbaOpenPoQuantity,
                       business3m: item.product.business3m,
+                      business1y: item.product.business1y,
+                      stockUpperLimit: item.product.stockUpperLimit,
                     },
                     lots: item.lots,
                   }))}
@@ -420,6 +435,7 @@ export default async function InventoryPage({
           </div>
         )}
       </div>
+      </SkuColumnProvider>
 
     </div>
   );

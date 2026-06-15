@@ -32,6 +32,11 @@ const Icons = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
     </svg>
   ),
+  stockLimits: (
+    <svg className={iconClass} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125v-3.75" />
+    </svg>
+  ),
 };
 
 const NAV_ITEMS = [
@@ -39,7 +44,7 @@ const NAV_ITEMS = [
   { href: "/inventory-check",      label: "在庫洗い出し",     icon: Icons.inventoryCheck },
   { href: "/provisional-plan",     label: "仮プラン作成",     icon: Icons.provisionalPlan },
   { href: "/delivery-plan",        label: "納品プラン管理",   icon: Icons.deliveryPlan },
-  { href: "/inventory/fba-limits", label: "FBA上限取り込み", icon: Icons.fbaLimits },
+  { href: "/inventory/stock-limits", label: "在庫上限取り込み", icon: Icons.stockLimits },
 ];
 
 export default async function DashboardLayout({

@@ -17,10 +17,10 @@ function formatSyncDate(iso: string | null): string {
   }
 }
 
-type SyncMode = "both" | "fba" | "logiless";
+type SyncMode = "both" | "fba" | "logiless" | "sales";
 type ButtonMode = SyncMode | "full";
 
-type StepKey = "articles" | "articlesFull" | "fba" | "logiless";
+type StepKey = "articles" | "articlesFull" | "fba" | "logiless" | "sales";
 type StepStatus = "pending" | "running" | "done" | "error";
 
 type Step = {
@@ -44,14 +44,16 @@ const STEP_LABEL: Record<StepKey, string> = {
   articlesFull: "商品マスタを再取得",
   fba: "FBA在庫を同期",
   logiless: "ロジレス在庫を同期",
+  sales: "売上を同期（3ヶ月・1年）",
 };
 
 type Props = {
   lastFbaSyncAt: string | null;
   lastLogilessSyncAt: string | null;
+  lastSalesSyncAt: string | null;
 };
 
-export default function SyncButton({ lastFbaSyncAt, lastLogilessSyncAt }: Props) {
+export default function SyncButton({ lastFbaSyncAt, lastLogilessSyncAt, lastSalesSyncAt }: Props) {
   const [loading, setLoading] = useState<ButtonMode | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const [reauthRequired, setReauthRequired] = useState(false);
@@ -200,12 +202,26 @@ export default function SyncButton({ lastFbaSyncAt, lastLogilessSyncAt }: Props)
         ? ["articles", "fba", "logiless"]
         : mode === "fba"
           ? ["fba"]
-          : ["logiless"];
+          : mode === "sales"
+            ? ["sales"]
+            : ["logiless"];
     setSteps(buildSteps(stepKeys));
     startElapsedTick();
 
     try {
       const parts: string[] = [];
+
+      // 売上同期は単独ステップ（SP-API レポート取得）
+      if (mode === "sales") {
+        const r = await streamRequest("/api/sync/sales-data", "sales");
+        if (!r.ok) {
+          setResult(`✗ 売上同期エラー: ${r.error}`);
+          return;
+        }
+        setResult(`✓ 売上 ${(r.data.updated as number) ?? 0}件更新`);
+        router.refresh();
+        return;
+      }
 
       if (mode === "both") {
         const r = await streamRequest("/api/sync/articles?mode=diff", "articles");
@@ -305,7 +321,11 @@ export default function SyncButton({ lastFbaSyncAt, lastLogilessSyncAt }: Props)
   }
 
   const isLoading = loading !== null;
-  const syncing = loading === "both" || loading === "fba" || loading === "logiless";
+  const syncing =
+    loading === "both" ||
+    loading === "fba" ||
+    loading === "logiless" ||
+    loading === "sales";
 
   const menuItems: { mode: SyncMode; label: string; sublabel: string; lastSync: string | null }[] = [
     {
@@ -326,6 +346,12 @@ export default function SyncButton({ lastFbaSyncAt, lastLogilessSyncAt }: Props)
       sublabel: "ロジレスからロット別在庫を取得",
       lastSync: lastLogilessSyncAt,
     },
+    {
+      mode: "sales",
+      label: "売上のみ",
+      sublabel: "SP-API から3ヶ月・1年の売上を取得（数分かかります）",
+      lastSync: lastSalesSyncAt,
+    },
   ];
 
   const showProgress = steps.length > 0;
@@ -344,20 +370,6 @@ export default function SyncButton({ lastFbaSyncAt, lastLogilessSyncAt }: Props)
   return (
     <div className="relative flex flex-col items-end gap-2">
       <div className="flex items-center gap-3">
-        {result && !showProgress && (
-          <span
-            className={`text-xs max-w-md ${
-              result.startsWith("✓")
-                ? "text-green-600"
-                : result.startsWith("✗")
-                  ? "text-red-600"
-                  : "text-gray-500"
-            }`}
-          >
-            {result}
-          </span>
-        )}
-
         {/* 同期ドロップダウン */}
         <div className="flex flex-col items-center gap-0.5">
           <div className="relative" ref={menuRef}>
@@ -381,7 +393,9 @@ export default function SyncButton({ lastFbaSyncAt, lastLogilessSyncAt }: Props)
                   ? "FBA同期中..."
                   : loading === "logiless"
                     ? "ロジレス同期中..."
-                    : "同期中..."
+                    : loading === "sales"
+                      ? "売上同期中..."
+                      : "同期中..."
                 : "同期"}
               <svg
                 className={`w-3 h-3 transition-transform ${menuOpen ? "rotate-180" : ""}`}
@@ -444,6 +458,21 @@ export default function SyncButton({ lastFbaSyncAt, lastLogilessSyncAt }: Props)
           </span>
         </div>
       </div>
+
+      {/* 同期結果（商品マスタ再取得ボタンの下に表示） */}
+      {result && !showProgress && (
+        <span
+          className={`text-xs max-w-md text-right ${
+            result.startsWith("✓")
+              ? "text-green-600"
+              : result.startsWith("✗")
+                ? "text-red-600"
+                : "text-gray-500"
+          }`}
+        >
+          {result}
+        </span>
+      )}
 
       {/* 進捗パネル */}
       {showProgress && (

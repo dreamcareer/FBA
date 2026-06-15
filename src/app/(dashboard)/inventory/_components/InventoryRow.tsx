@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { getProductColor } from "@/lib/product-colors";
+import { useSkuColumn } from "./SkuColumnContext";
 
 type Lot = {
   id: string;
@@ -16,6 +17,7 @@ type Props = {
     id: string;
     sku: string;
     asin: string | null;
+    jan: string | null;
     name: string;
     productType: string;
     fbaStockQuantity: number;
@@ -23,6 +25,8 @@ type Props = {
     fbaLimitNote: string | null;
     fbaOpenPoQuantity: number | null;
     business3m: number | null;
+    business1y: number | null;
+    stockUpperLimit: number | null;
   };
   lots: Lot[];
   stripe: string;
@@ -31,6 +35,7 @@ type Props = {
 
 export default function InventoryRow({ product, lots, stripe, minExpiry }: Props) {
   const [open, setOpen] = useState(false);
+  const { expanded: skuExpanded } = useSkuColumn();
   const hasLots = lots.length > 1;
   const productColor = getProductColor(product.name);
 
@@ -58,10 +63,16 @@ export default function InventoryRow({ product, lots, stripe, minExpiry }: Props
         className={`hover:bg-gray-50/50 border-b border-gray-100 ${hasLots ? "cursor-pointer" : ""}`}
         onClick={() => hasLots && setOpen(!open)}
       >
-        <td className="px-3 py-0.5 font-mono text-gray-500 whitespace-nowrap">
+        <td className="px-3 py-0.5 font-mono text-gray-500 whitespace-nowrap align-top">
           {product.sku}
-          <br />
-          <span className="text-gray-400">{product.asin ?? "—"}</span>
+          {skuExpanded && (
+            <>
+              <br />
+              <span className="text-gray-400">{product.asin ?? "—"}</span>
+              <br />
+              <span className="text-gray-400">{product.jan ?? "—"}</span>
+            </>
+          )}
         </td>
         <td className="px-3 py-0.5 text-gray-800 whitespace-nowrap">
           {product.name}
@@ -96,12 +107,18 @@ export default function InventoryRow({ product, lots, stripe, minExpiry }: Props
         <td className="px-3 py-0.5 text-right tabular-nums text-gray-400">
           {product.business3m?.toFixed(1) ?? "—"}
         </td>
+        <td className="px-3 py-0.5 text-right tabular-nums text-gray-400">
+          {product.business1y?.toFixed(1) ?? "—"}
+        </td>
         <td className="px-3 py-0.5 font-mono text-gray-500 max-w-[120px] truncate" title={locations.join(", ")}>
           {locations.length > 0 ? locations.join(", ") : "—"}
         </td>
         <td className={`px-3 py-0.5 whitespace-nowrap ${expiryWarning ? "text-amber-600 font-semibold" : "text-gray-400"}`}>
           {nearestExpiry ? formatDate(nearestExpiry) : "—"}
           {expiryWarning && " ⚠"}
+        </td>
+        <td className="px-3 py-0.5 text-right tabular-nums text-gray-400">
+          {product.stockUpperLimit?.toLocaleString() ?? "—"}
         </td>
       </tr>
 
@@ -122,6 +139,7 @@ export default function InventoryRow({ product, lots, stripe, minExpiry }: Props
               {lot.quantity.toLocaleString()}
             </td>
             <td className="px-3 py-0.5" />
+            <td className="px-3 py-0.5" />
             <td className="px-3 py-0.5 font-mono text-gray-500">
               {lot.location ?? "—"}
             </td>
@@ -129,6 +147,7 @@ export default function InventoryRow({ product, lots, stripe, minExpiry }: Props
               {lotExpiry ? formatDate(lotExpiry) : "—"}
               {lotWarn && " ⚠"}
             </td>
+            <td className="px-3 py-0.5" />
           </tr>
         );
       })}

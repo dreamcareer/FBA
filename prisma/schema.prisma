@@ -45,6 +45,9 @@ model Product {
   // ロジレスに残す在庫数
   logilessStockReserve Int @default(25) @map("logiless_stock_reserve")
 
+  // 在庫上限（手動管理）
+  stockUpperLimit Int? @map("stock_upper_limit")
+
   // 売上データ（SP-APIから同期）
   business1y        Float?    @map("business_1y")
   business3m        Float?    @map("business_3m")
