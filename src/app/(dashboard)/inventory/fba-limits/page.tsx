@@ -25,7 +25,7 @@ export default async function FbaLimitsImportPage() {
           ← 在庫一覧に戻る
         </Link>
         <h1 className="text-lg font-semibold text-gray-900 mt-2">
-          FBA上限指定 CSV取り込み
+          FBA上限指定 CSV取り込み（オリジナル）
         </h1>
         <p className="text-sm text-gray-500 mt-0.5">
           SKUごとのFBA上限指定CSV（SKU, 上限指定）を取り込みます

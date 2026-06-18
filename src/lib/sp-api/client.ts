@@ -214,6 +214,7 @@ export interface FbaInventoryItem {
   fnsku: string | null;
   productName: string | null;
   condition: string | null;
+  lastUpdatedTime: string | null; // 在庫レコードの最終更新時刻（画面の最終更新日に近い候補）
   totalQuantity: number;       // 全在庫合計（fulfillable + inbound + reserved + unfulfillable + researching）
   fulfillableQuantity: number; // 出荷可能
   inboundWorkingQuantity: number;   // 納品準備中
@@ -230,6 +231,7 @@ interface RawInventorySummary {
   sellerSku?: string;
   condition?: string;
   productName?: string;
+  lastUpdatedTime?: string;
   totalQuantity?: number;
   inventoryDetails?: {
     fulfillableQuantity?: number;
@@ -283,6 +285,7 @@ export async function fetchFbaInventory(
         fnsku: s.fnSku ?? null,
         productName: s.productName ?? null,
         condition: s.condition ?? null,
+        lastUpdatedTime: s.lastUpdatedTime ?? null,
         totalQuantity: s.totalQuantity ?? 0,
         fulfillableQuantity: s.inventoryDetails?.fulfillableQuantity ?? 0,
         inboundWorkingQuantity: s.inventoryDetails?.inboundWorkingQuantity ?? 0,
@@ -328,6 +331,134 @@ export async function getFnskuLabels(
   _shipmentId: string
 ): Promise<{ sku: string; pdfUrl: string }[]> {
   throw new NotImplementedError("getFnskuLabels");
+}
+
+// ── 出品（Listings Items API） ──────────────────────────────
+//
+// 「停止中 × FBA × 前日12時以降に更新」の出品を検出するための取得。
+// Seller Central の在庫管理画面（出品ステータス=停止中 / 並べ替え=最終更新日）
+// に相当する操作を searchListingsItems で再現する。
+//
+// - 停止中     → withoutStatus=BUYABLE（購入不可＝停止中相当。実データで要検証）
+// - 最終更新日 → sortBy=lastUpdatedDate, sortOrder=DESC
+// - 前日12時〜 → lastUpdatedAfter（ISO 8601）
+// - 出荷元     → fulfillmentAvailability を取得し呼び出し側で判定
+//   （FBA判定は同期済みFBA在庫との突合のほうが確実なので、ここでは生データを返す）
+
+const LISTINGS_BASE = "/listings/2021-08-01";
+const LISTINGS_PAGE_SIZE = 20; // searchListingsItems の pageSize 上限
+const LISTINGS_MAX_PAGES = 50; // 暴走防止のページ上限
+
+export interface ListingItem {
+  sku: string;
+  asin: string | null;
+  itemName: string | null;
+  /** ["BUYABLE", "DISCOVERABLE"] など。停止中は BUYABLE を含まない想定 */
+  status: string[];
+  createdDate: string | null;
+  lastUpdatedDate: string | null;
+  /** 出品者出荷(MFN)の在庫枠。FBA専用出品では空のことが多い */
+  fulfillmentAvailability: { fulfillmentChannelCode: string; quantity: number | null }[];
+}
+
+interface RawListingsItem {
+  sku: string;
+  summaries?: {
+    marketplaceId?: string;
+    asin?: string;
+    itemName?: string;
+    status?: string[];
+    createdDate?: string;
+    lastUpdatedDate?: string;
+  }[];
+  fulfillmentAvailability?: { fulfillmentChannelCode?: string; quantity?: number }[];
+}
+
+interface SearchListingsResponse {
+  numberOfResults?: number;
+  pagination?: { nextToken?: string };
+  items?: RawListingsItem[];
+}
+
+export interface SearchListingsOptions {
+  /** ISO 8601。この時刻以降に最終更新された出品のみ（例: 前日12:00 JST） */
+  lastUpdatedAfter?: string;
+  /** true で withoutStatus=BUYABLE（停止中相当）に絞る */
+  onlyInactive?: boolean;
+  /**
+   * true で出荷元=Amazon(FBA)のみに絞る。
+   * fulfillmentChannelCode が AMAZON_* のものがFBA（DEFAULT=出品者出荷）。
+   * クエリでは絞れないため取得後にフィルタする。
+   */
+  onlyFba?: boolean;
+}
+
+/** 出荷元がFBA(Amazon出荷)の出品かどうか */
+export function isFbaListing(item: ListingItem): boolean {
+  return item.fulfillmentAvailability.some((f) =>
+    f.fulfillmentChannelCode.startsWith("AMAZON")
+  );
+}
+
+/**
+ * searchListingsItems で出品を検索する（ページネーション込み）。
+ * marketplaceIds と出品者ID(SP_API_SELLER_ID) が必須。
+ */
+export async function searchListings(
+  opts: SearchListingsOptions = {}
+): Promise<ListingItem[]> {
+  const marketplaceId = process.env.SP_API_MARKETPLACE_ID;
+  const sellerId = process.env.SP_API_SELLER_ID;
+  if (!marketplaceId) {
+    throw new Error("SP-API: SP_API_MARKETPLACE_ID が設定されていません");
+  }
+  if (!sellerId) {
+    throw new Error(
+      "SP-API: SP_API_SELLER_ID（出品者ID / Merchant Token）が設定されていません"
+    );
+  }
+
+  const all: ListingItem[] = [];
+  let pageToken: string | undefined;
+  let page = 0;
+
+  do {
+    const params = new URLSearchParams({
+      marketplaceIds: marketplaceId,
+      includedData: "summaries,fulfillmentAvailability",
+      sortBy: "lastUpdatedDate",
+      sortOrder: "DESC",
+      pageSize: String(LISTINGS_PAGE_SIZE),
+    });
+    if (opts.onlyInactive) params.set("withoutStatus", "BUYABLE");
+    if (opts.lastUpdatedAfter) params.set("lastUpdatedAfter", opts.lastUpdatedAfter);
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const res: SearchListingsResponse = await request(
+      `${LISTINGS_BASE}/items/${encodeURIComponent(sellerId)}?${params.toString()}`
+    );
+
+    for (const item of res.items ?? []) {
+      const s = item.summaries?.[0];
+      all.push({
+        sku: item.sku,
+        asin: s?.asin ?? null,
+        itemName: s?.itemName ?? null,
+        status: s?.status ?? [],
+        createdDate: s?.createdDate ?? null,
+        lastUpdatedDate: s?.lastUpdatedDate ?? null,
+        fulfillmentAvailability: (item.fulfillmentAvailability ?? []).map((f) => ({
+          fulfillmentChannelCode: f.fulfillmentChannelCode ?? "",
+          quantity: f.quantity ?? null,
+        })),
+      });
+    }
+
+    pageToken = res.pagination?.nextToken;
+    page++;
+  } while (pageToken && page < LISTINGS_MAX_PAGES);
+
+  return opts.onlyFba ? all.filter(isFbaListing) : all;
 }
 
 // ── 売上（Sales & Traffic ビジネスレポート） ──────────────────
