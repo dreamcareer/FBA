@@ -182,6 +182,22 @@ model CalculationEndPosition {
   @@map("calculation_end_positions")
 }
 
+// ── FBA停止中スナップショット（出品者出荷切替の検出用） ──────────
+// 「停止中×FBA」の現在集合を保持し、毎回のバッチで差分を取る。
+// 新規に現れたSKU = 新たに在庫切れになったSKU（画面の最終更新日の代替）。
+model FbaInactiveListing {
+  id              String    @id @default(cuid()) @map("fba_inactive_listing_id")
+  sku             String    @unique
+  asin            String?
+  itemName        String?   @map("item_name")
+  firstDetectedAt DateTime  @default(now()) @map("first_detected_at") // 初めて停止中で検出した時刻（≒在庫切れになった日）
+  lastSeenAt      DateTime  @default(now()) @map("last_seen_at") // 直近バッチで在庫切れを確認した時刻
+  processedAt     DateTime? @map("processed_at") // 出品者出荷への切替処理が済んだ時刻（null=未処理）
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("fba_inactive_listings")
+}
+
 // ── OAuthトークン ─────────────────────────────────────────
 model OAuthToken {
   id           String    @id @default(cuid())
