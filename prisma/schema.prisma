@@ -193,6 +193,7 @@ model FbaInactiveListing {
   firstDetectedAt DateTime  @default(now()) @map("first_detected_at") // 初めて停止中で検出した時刻（≒在庫切れになった日）
   lastSeenAt      DateTime  @default(now()) @map("last_seen_at") // 直近バッチで在庫切れを確認した時刻
   processedAt     DateTime? @map("processed_at") // 出品者出荷への切替処理が済んだ時刻（null=未処理）
+  replenishedQty  Int?      @map("replenished_qty") // 切替時にFBM在庫へ補充した数（日報用）
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
   @@map("fba_inactive_listings")

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { db } from "@/lib/db";
 import { syncInactiveFbaSnapshot } from "@/lib/seller-switch/snapshot";
+import { enrichCandidates } from "@/lib/seller-switch/enrich";
 
 /**
  * /api/seller-switch/detect
@@ -48,19 +49,19 @@ export async function GET(req: NextRequest) {
       return !latest || l.lastSeenAt > latest ? l.lastSeenAt : latest;
     }, null);
 
+    // 判定・補充数・除外理由を付与（②突合＋③補充数）
+    const candidates = await enrichCandidates(listings);
+
     return NextResponse.json({
       data: {
         total: listings.length,
         unprocessed: listings.filter((l) => !l.processedAt).length,
+        // 未処理かつ「切替対象」の件数（実際にアクションが必要な数）
+        switchTarget: candidates.filter(
+          (c) => !c.processedAt && c.judgement === "TARGET"
+        ).length,
         lastDetectedAt,
-        candidates: listings.map((l) => ({
-          sku: l.sku,
-          asin: l.asin,
-          itemName: l.itemName,
-          firstDetectedAt: l.firstDetectedAt,
-          lastSeenAt: l.lastSeenAt,
-          processedAt: l.processedAt,
-        })),
+        candidates,
       },
     });
   } catch (error) {

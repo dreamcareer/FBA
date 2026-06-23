@@ -1,6 +1,6 @@
 import { addMonths, isAfter, isBefore } from "date-fns";
 import { getColorName } from "@/lib/product-colors";
-import { isUnsellableLocation } from "@/lib/logiless/locations";
+import { isDeliveryExcludedLocation } from "@/lib/logiless/locations";
 import type {
   CalculationSummary,
   DeliveryCalculationResult,
@@ -69,7 +69,7 @@ function getDeliverableLots(
   return inventories
     .filter((inv) => {
       // ロケーションが納品不可の場合はスキップ
-      if (isUnavailableLocation(inv.location)) return false;
+      if (isDeliveryExcludedLocation(inv.location)) return false;
       // 期限なし（長期保存品）は納品可
       if (!inv.expiryDate) return true;
       // 期限が14ヶ月以上先のみ納品可
@@ -81,20 +81,6 @@ function getDeliverableLots(
       if (!b.expiryDate) return -1;
       return a.expiryDate.getTime() - b.expiryDate.getTime();
     });
-}
-
-/** 納品不可ロケーション判定 */
-function isUnavailableLocation(location: string | null): boolean {
-  if (!location) return false;
-  // 不具合品・返送品・出荷期限切れ品は納品対象外（共通の販売不可判定）
-  if (isUnsellableLocation(location)) return true;
-  const unavailable = [
-    "アウトレット専用在庫",
-    "FBA専用在庫",
-  ];
-  // "Amazon" + 数字 または 地名（簡易判定）
-  if (/^Amazon\d+/.test(location)) return true;
-  return unavailable.some((u) => location.startsWith(u));
 }
 
 /** 期限が14〜18ヶ月以内かどうか */
