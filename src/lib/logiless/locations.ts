@@ -26,3 +26,23 @@ export const excludeUnsellableLocations = {
     location: { startsWith: p },
   })),
 };
+
+/**
+ * 納品・補充の対象外ロケーション判定（共通）。
+ *
+ * 販売不可（不具合品/返送品/出荷期限切れ）に加え、納品・補充に回せない
+ * アウトレット専用・FBA専用・Amazon倉庫（Amazon+数字）を除外する。
+ * 納品数量計算（src/lib/delivery/calculator.ts）と出品者切替の補充数計算で共用。
+ * ※「地名」ロケーションは現状リストが未定義のため、簡易判定（Amazon+数字）のみ。
+ */
+export function isDeliveryExcludedLocation(location: string | null): boolean {
+  if (!location) return false;
+  // 不具合品・返送品・出荷期限切れ品（共通の販売不可判定）
+  if (isUnsellableLocation(location)) return true;
+  // Amazon倉庫（"Amazon" + 数字）
+  if (/^Amazon\d+/.test(location)) return true;
+  // アウトレット専用・FBA専用
+  return ["アウトレット専用在庫", "FBA専用在庫"].some((u) =>
+    location.startsWith(u)
+  );
+}
